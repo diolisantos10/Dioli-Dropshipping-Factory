@@ -1,0 +1,4 @@
+import test from 'node:test'; import assert from 'node:assert/strict'; import { calculatePrice, emptyPricing } from '../src/lib/pricing.ts';
+const base = { productId:'p1', supplierCost:50, shipping:10, taxes:5, fixedFees:2, channelFeePercent:12, paymentFeePercent:4, operatingCost:3, reserve:5, targetMarginPercent:25, minimumMarginPercent:15, currency:'BRL' };
+test('preço preserva componentes e é explicável', () => { const c=calculatePrice(emptyPricing,base,'x','now').calculations[0]; assert.equal(c.totalFixedCost,75); assert.equal(c.status,'CALCULADO'); assert.ok(c.suggestedPrice > c.minimumSafePrice); });
+test('margin guard bloqueia cálculo inseguro', () => { const c=calculatePrice(emptyPricing,{...base,targetMarginPercent:10,minimumMarginPercent:20},'x','now').calculations[0]; assert.equal(c.status,'BLOQUEADO'); assert.equal(c.suggestedPrice,null); });
