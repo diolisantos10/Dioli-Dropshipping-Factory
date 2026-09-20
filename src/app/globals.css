@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+.ddf-input { display: block; width: 100%; margin-top: 8px; padding: 12px; border: 1px solid #b8b1a7; border-radius: 6px; background: white; color: #17191d; }
+.ddf-button { width: fit-content; min-height: 44px; padding: 10px 18px; background: #17191d; color: white; border: 1px solid #17191d; border-radius: 6px; cursor: pointer; }
+.ddf-button.secondary { background: white; color: #17191d; }
+.ddf-button:hover { outline: 2px solid #ff5b2e; }
+
 :root {
   --ink: #17191d;
   --muted: #696d75;
@@ -190,7 +195,8 @@ a {
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 767px) {
+  .side-rail .desktop-only { display: block !important; }
   .app-shell {
     display: block;
   }

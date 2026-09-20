@@ -51,6 +51,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         <Link
                           href={item.href}
                           title={item.label}
+                          aria-label={item.label}
+                          aria-current={active ? 'page' : undefined}
                           onClick={() => setNavigationOpen(false)}
                           className={`group relative flex min-h-11 items-center gap-3 rounded-lg px-3 text-[13px] transition-colors ${
                             active
@@ -115,6 +117,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               type="button"
               className="hidden h-10 min-w-64 items-center gap-3 rounded-md border border-[#ddd9d1] bg-white px-3 text-left text-xs text-[#777b83] transition-colors hover:border-[#b9b5ad] lg:flex"
               aria-label="Buscar na fábrica"
+              disabled
+              title="Busca global em construção; use a busca na Prateleira Bruta"
             >
               <Search size={16} />
               <span className="flex-1">Buscar produtos, jobs ou eventos</span>
@@ -124,15 +128,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               type="button"
               className="relative grid h-10 w-10 place-items-center rounded-md border border-[#ddd9d1] bg-white text-[#4d5159] transition-colors hover:border-[#b9b5ad] hover:text-[#17191d]"
               aria-label="Notificações"
+              disabled
+              title="Notificações em construção"
             >
               <Bell size={17} />
-              <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-[#ff5b2e]" />
             </button>
             <div className="hidden items-center gap-2 border-l border-[#ddd9d1] pl-3 sm:flex">
               <ShieldCheck size={17} className="text-[#157347]" />
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#157347]">Operação segura</p>
-                <p className="text-[10px] text-[#777b83]">Aprovação obrigatória</p>
+                <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#157347]">Demonstração</p>
+                <p className="text-[10px] text-[#777b83]">Sem operações externas</p>
               </div>
             </div>
           </div>
