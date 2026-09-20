@@ -36,10 +36,11 @@ export function updateProduct(state: ProductFactoryState, id: string, input: Pic
   const next = { ...current, ...input, universalTitle: input.universalTitle.trim(), shortDescription: input.shortDescription.trim(), longDescription: input.longDescription.trim(), category: input.category.trim(), bullets: clean(input.bullets), benefits: clean(input.benefits), tags: clean(input.tags), version, updatedAt: at };
   return { ...state, products: state.products.map(p => p.id === id ? next : p), events: [{ id: `${id}:${version}`, productId: id, action: 'RASCUNHO_ATUALIZADO', at, actor: 'Aprovador · demonstração', version }, ...state.events] };
 }
-export function markProductReady(state: ProductFactoryState, id: string, at: string): ProductFactoryState {
+export function markProductReady(state: ProductFactoryState, id: string, at: string, approvedMedia: boolean): ProductFactoryState {
   const current = state.products.find(p => p.id === id);
   if (!current || current.status !== 'EM_PRODUCAO') throw new Error('Produto indisponível para conclusão.');
   const gaps = productGaps(current); if (gaps.length) throw new Error(`Complete antes de finalizar: ${gaps.join(', ')}.`);
+  if (!approvedMedia) throw new Error('Aprove ao menos uma mídia na Media Factory antes de finalizar.');
   const version = current.version + 1;
   return { ...state, products: state.products.map(p => p.id === id ? { ...p, status: 'PRONTO', version, updatedAt: at } : p), events: [{ id: `${id}:${version}`, productId: id, action: 'PRODUTO_PRONTO', at, actor: 'Aprovador · demonstração', version }, ...state.events] };
 }

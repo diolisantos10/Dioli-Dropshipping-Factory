@@ -14,13 +14,14 @@ test('produção só começa com candidato aprovado e não duplica cadastro mest
 test('produto incompleto não pode ser marcado como pronto', () => {
   const state = startProduct(emptyProductFactory, approved, 'p1', 'now');
   assert.ok(productGaps(state.products[0]).length > 0);
-  assert.throws(() => markProductReady(state, 'p1', 'later'), /Complete antes/);
+  assert.throws(() => markProductReady(state, 'p1', 'later', false), /Complete antes/);
 });
 
 test('cadastro completo gera versão pronta sem fornecedor ou publicação', () => {
   let state = startProduct(emptyProductFactory, approved, 'p1', 'now');
   state = updateProduct(state, 'p1', { universalTitle: 'Título', category: 'Casa', shortDescription: 'Descrição curta', longDescription: 'Descrição completa', bullets: ['Um', 'Dois', 'Três'], benefits: ['Benefício A', 'Benefício B'], tags: ['casa'] }, 'later');
-  state = markProductReady(state, 'p1', 'finish');
+  assert.throws(() => markProductReady(state, 'p1', 'finish', false), /mídia/);
+  state = markProductReady(state, 'p1', 'finish', true);
   assert.equal(state.products[0].status, 'PRONTO');
   assert.equal(state.products[0].version, 3);
   assert.equal('supplierOffer' in state.products[0], false);

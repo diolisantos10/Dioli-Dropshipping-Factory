@@ -3,23 +3,25 @@
 import { useState, useSyncExternalStore } from 'react';
 import { emptyIntake, INTAKE_STORAGE_KEY, type IntakeState } from '@/lib/intake';
 import { emptyProductFactory, markProductReady, PRODUCT_STORAGE_KEY, productGaps, startProduct, updateProduct, type MasterProduct, type ProductFactoryState } from '@/lib/product-factory';
+import { emptyMedia, hasApprovedMedia, MEDIA_STORAGE_KEY, type MediaState } from '@/lib/media-factory';
 
 const eventName = 'ddf-products-change';
 function subscribe(callback: () => void) { window.addEventListener('storage', callback); window.addEventListener(eventName, callback); return () => { window.removeEventListener('storage', callback); window.removeEventListener(eventName, callback); }; }
-function snapshot() { try { return `${localStorage.getItem(INTAKE_STORAGE_KEY) ?? ''}\n${localStorage.getItem(PRODUCT_STORAGE_KEY) ?? ''}`; } catch { return 'unavailable'; } }
+function snapshot() { try { return `${localStorage.getItem(INTAKE_STORAGE_KEY) ?? ''}\n${localStorage.getItem(PRODUCT_STORAGE_KEY) ?? ''}\n${localStorage.getItem(MEDIA_STORAGE_KEY) ?? ''}`; } catch { return 'unavailable'; } }
 function parse(raw: string | null) {
-  if (!raw) return { intake: emptyIntake, factory: emptyProductFactory };
-  const [intakeRaw, factoryRaw] = raw.split('\n');
+  if (!raw) return { intake: emptyIntake, factory: emptyProductFactory, media: emptyMedia };
+  const [intakeRaw, factoryRaw, mediaRaw] = raw.split('\n');
   const intake: IntakeState = intakeRaw ? JSON.parse(intakeRaw) : emptyIntake;
   const factory: ProductFactoryState = factoryRaw ? JSON.parse(factoryRaw) : emptyProductFactory;
-  if (intake.version !== 1 || factory.version !== 1 || !Array.isArray(intake.candidates) || !Array.isArray(factory.products)) throw new Error();
-  return { intake, factory };
+  const media: MediaState = mediaRaw ? JSON.parse(mediaRaw) : emptyMedia;
+  if (intake.version !== 1 || factory.version !== 1 || media.version !== 1 || !Array.isArray(intake.candidates) || !Array.isArray(factory.products) || !Array.isArray(media.assets)) throw new Error();
+  return { intake, factory, media };
 }
 const lines = (value: FormDataEntryValue | null) => String(value ?? '').split('\n');
 
 export function ProductFactoryWorkspace({ mode }: { mode: 'factory' | 'catalog' }) {
   const raw = useSyncExternalStore(subscribe, snapshot, () => null);
-  let data = { intake: emptyIntake, factory: emptyProductFactory }; let loadError = '';
+  let data = { intake: emptyIntake, factory: emptyProductFactory, media: emptyMedia }; let loadError = '';
   try { data = parse(raw); } catch { loadError = 'Os dados locais não puderam ser lidos. A edição foi bloqueada para protegê-los.'; }
   const [editing, setEditing] = useState<string | null>(null); const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [query, setQuery] = useState('');
   const approved = data.intake.candidates.filter(c => c.status === 'APROVADO' && !data.factory.products.some(p => p.candidateId === c.id));
@@ -34,7 +36,7 @@ export function ProductFactoryWorkspace({ mode }: { mode: 'factory' | 'catalog' 
     <label className="block">Buscar produto<input className="ddf-input" value={query} onChange={e => setQuery(e.target.value)} /></label>
     <p className="text-sm text-gray-600">{products.length} produto(s) nesta área</p>
     {products.length === 0 && <div className="surface p-8"><h2 className="text-lg font-semibold">{mode === 'catalog' ? 'Nenhum produto pronto' : 'A fábrica está vazia'}</h2><p className="mt-2">{mode === 'catalog' ? 'Finalize um cadastro mestre na Product Factory.' : 'Aprove um candidato na Sala de Triagem e inicie sua produção.'}</p></div>}
-    {products.map(product => <ProductCard key={product.id} product={product} editable={mode === 'factory'} editing={editing === product.id} onEdit={() => setEditing(product.id)} onCancel={() => setEditing(null)} onSave={form => act(() => updateProduct(data.factory, product.id, { universalTitle: String(form.get('title')), category: String(form.get('category')), shortDescription: String(form.get('short')), longDescription: String(form.get('long')), bullets: lines(form.get('bullets')), benefits: lines(form.get('benefits')), tags: String(form.get('tags')).split(',') }, new Date().toISOString()), 'Rascunho salvo e nova versão registrada.')} onReady={() => act(() => markProductReady(data.factory, product.id, new Date().toISOString()), 'Produto marcado como pronto. Nenhuma publicação foi iniciada.')} />)}
+    {products.map(product => <ProductCard key={product.id} product={product} editable={mode === 'factory'} editing={editing === product.id} onEdit={() => setEditing(product.id)} onCancel={() => setEditing(null)} onSave={form => act(() => updateProduct(data.factory, product.id, { universalTitle: String(form.get('title')), category: String(form.get('category')), shortDescription: String(form.get('short')), longDescription: String(form.get('long')), bullets: lines(form.get('bullets')), benefits: lines(form.get('benefits')), tags: String(form.get('tags')).split(',') }, new Date().toISOString()), 'Rascunho salvo e nova versão registrada.')} onReady={() => act(() => markProductReady(data.factory, product.id, new Date().toISOString(), hasApprovedMedia(data.media, product.id)), 'Produto marcado como pronto. Nenhuma publicação foi iniciada.')} />)}
   </div>;
 }
 

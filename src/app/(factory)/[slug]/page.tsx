@@ -88,7 +88,7 @@ const modules: Record<string, ModuleDefinition> = {
 };
 
 export function generateStaticParams() {
-  return Object.keys(modules).filter(slug => !['prateleira-bruta', 'triagem', 'auditoria', 'product-factory', 'disponiveis'].includes(slug)).map((slug) => ({ slug }));
+  return Object.keys(modules).filter(slug => !['prateleira-bruta', 'triagem', 'auditoria', 'product-factory', 'media-factory', 'disponiveis'].includes(slug)).map((slug) => ({ slug }));
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
