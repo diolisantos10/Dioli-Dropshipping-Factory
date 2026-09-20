@@ -2,9 +2,9 @@
 
 import { useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
-import { addCandidate, emptyIntake, transitionCandidate, type CandidateStatus, type IntakeState } from '@/lib/intake';
+import { addCandidate, emptyIntake, INTAKE_STORAGE_KEY, transitionCandidate, type CandidateStatus, type IntakeState } from '@/lib/intake';
 
-const key = 'ddf.intake.demo.v1';
+const key = INTAKE_STORAGE_KEY;
 function subscribe(callback: () => void) {
   window.addEventListener('storage', callback);
   window.addEventListener('ddf-intake-change', callback);

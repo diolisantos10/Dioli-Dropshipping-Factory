@@ -2,6 +2,7 @@ export type CandidateStatus = 'CANDIDATO' | 'TRIADO' | 'APROVADO' | 'REJEITADO' 
 export type Candidate = { id: string; name: string; url: string; notes: string; status: CandidateStatus; createdAt: string };
 export type DecisionEvent = { id: string; candidateId: string; name: string; before: CandidateStatus | null; after: CandidateStatus; reason: string; at: string; actor: string };
 export type IntakeState = { version: 1; candidates: Candidate[]; events: DecisionEvent[] };
+export const INTAKE_STORAGE_KEY = 'ddf.intake.demo.v1';
 export const emptyIntake: IntakeState = { version: 1, candidates: [], events: [] };
 const transitions: Record<CandidateStatus, CandidateStatus[]> = {
   CANDIDATO: ['TRIADO', 'ARQUIVADO'], TRIADO: ['APROVADO', 'REJEITADO', 'ARQUIVADO'],
