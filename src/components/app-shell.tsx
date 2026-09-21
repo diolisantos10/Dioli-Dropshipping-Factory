@@ -21,8 +21,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 DDF
               </span>
               <span className="desktop-only leading-tight">
-                <strong className="block text-sm tracking-[-0.02em]">Dioli Factory</strong>
-                <span className="text-[11px] text-[#969aa3]">Control Room</span>
+                <strong className="block text-sm tracking-[-0.02em]">Dioli Dropshipping Factory</strong>
+                <span className="text-[11px] text-[#969aa3]">Fábrica operacional</span>
               </span>
             </Link>
             <button
@@ -107,7 +107,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Menu size={20} />
             </button>
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold tracking-[-0.02em]">{current?.label ?? "DDF Control Room"}</p>
+              <p className="truncate text-sm font-semibold tracking-[-0.02em]">{current?.label ?? "DDF"}</p>
               <p className="hidden text-[11px] text-[#747880] sm:block">Ambiente controlado · Dados simulados</p>
             </div>
           </div>

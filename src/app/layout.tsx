@@ -3,11 +3,11 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "DDF Control Room",
-    template: "%s · DDF Control Room",
+    default: "DDF — Dioli Dropshipping Factory",
+    template: "%s · DDF",
   },
   description:
-    "Control Room da Dioli Dropshipping Factory — seleção, produção, margem e distribuição de produtos.",
+    "Dioli Dropshipping Factory — seleção, produção, margem e distribuição de produtos.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
