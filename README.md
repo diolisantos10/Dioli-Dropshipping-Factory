@@ -23,6 +23,9 @@ Implemented foundation:
 - overview dashboard with controlled fixtures;
 - accessibility linting and reduced-motion support;
 - zero known production dependency vulnerabilities at the current lockfile state.
+- versioned PostgreSQL migrations for the universal relational domain;
+- immutable backend audit events, correlation IDs, and transactional outbox;
+- security headers, authentication throttling, database-aware health checks, and CI gates.
 
 ## Local development
 
@@ -42,9 +45,15 @@ Open `http://127.0.0.1:3000`. The explicit hostname avoids network-interface dis
 
 ```bash
 npm run lint
+npm test
+npm run db:verify
 npm run build
 npm audit --omit=dev
 ```
+
+Operational procedures and the security baseline are documented in
+[`docs/OPERATIONS-RUNBOOK.md`](./docs/OPERATIONS-RUNBOOK.md) and
+[`docs/THREAT-MODEL.md`](./docs/THREAT-MODEL.md).
 
 ## Delivery principle
 

@@ -21,8 +21,8 @@ hardening/expansão · `[ ]` pendente · `[D]` decisão deliberadamente adiada.
 
 ### Ainda necessário para a DDF completa de produção
 
-- Modelagem relacional transacional e migrations; hoje o PostgreSQL persiste o
-  estado compartilhado como documento JSON versionado.
+- Schema relacional e migrations já existem; o cutover dos fluxos da interface
+  para repositórios transacionais por entidade ainda está em execução.
 - Autenticação por sessão, papéis/permissões, trilha imutável e segurança avançada.
 - Schema universal completo, storage real de mídia e jobs assíncronos.
 - Pricing multicontexto e Intelligence comercial reconciliável.
@@ -46,10 +46,10 @@ econômica ou externa pode ocorrer implicitamente.
 - [x] Definir navegação e arquitetura de informação da DDF.
 - [x] Registrar proprietário inicial das aprovações.
 - [D] Escolher fornecedor, canal, marcas e provedores externos ao final.
-- [-] Arquitetura de produção com PostgreSQL e autenticação; ORM, filas e storage pendentes.
-- [ ] Criar schema relacional e migrations versionadas.
+- [-] Arquitetura de produção com PostgreSQL, migrations e autenticação; workers e storage pendentes.
+- [x] Criar schema relacional extensível e migrations versionadas.
 - [ ] Implementar papéis, permissões e princípio do menor privilégio.
-- [-] IDs de correlação e idempotência existem nos fluxos simulados; contrato de eventos pendente.
+- [x] Criar IDs de correlação, idempotência e contrato base de eventos/outbox.
 - [-] Produção configurada sem segredos no código; local e preview ainda precisam padronização.
 
 ## B1 — Intake e Portfolio Gate
@@ -113,8 +113,8 @@ econômica ou externa pode ocorrer implicitamente.
 ## B6 — Auditoria, eventos e observabilidade
 
 - [x] Linha do tempo agregando decisões, produto, mídia e pricing.
-- [-] Histórico compartilhado; falta audit trail imutável com identidade forte do ator.
-- [ ] Outbox/event bus, retries e dead-letter queue.
+- [-] Audit trail imutável no backend; identidade individual via IdP ainda pendente.
+- [-] Outbox transacional criada; worker, retries e dead-letter operacional pendentes.
 - [ ] Estado stale, falhas, latência, filas e saúde operacional visíveis.
 - [ ] Navegação causal entre evento, cálculo, job e entidade afetada.
 - [ ] Alertas e runbooks de recuperação.
@@ -158,12 +158,12 @@ econômica ou externa pode ocorrer implicitamente.
 - [x] Lint, build de produção e 14 testes de domínio aprovados.
 - [ ] Testes unitários completos, integração, E2E e acessibilidade.
 - [-] QA funcional nos fluxos principais; matriz visual desktop/mobile e estados especiais pendente.
-- [-] Basic Auth e validações básicas; threat model, sessão, headers e rate limiting pendentes.
-- [ ] Backups, restauração testada e plano de migrations/rollback.
-- [ ] CI com gates obrigatórios e preview por branch.
+- [-] Basic Auth, threat model, headers e rate limiting concluídos; IdP/sessão e schemas runtime pendentes.
+- [-] Plano de backup, restauração e rollback documentado; restore drill ainda pendente.
+- [-] CI com gates obrigatórios criado; preview por branch pendente.
 - [x] Projeto, aplicação, PostgreSQL e variáveis configurados no Railway.
 - [-] Deploy, smoke tests, domínio, TLS e health concluídos; observabilidade completa pendente.
-- [ ] Documentação operacional e aceite final do proprietário.
+- [-] Runbook operacional e segurança documentados; aceite final do proprietário pendente.
 
 ## Portões de liberação
 

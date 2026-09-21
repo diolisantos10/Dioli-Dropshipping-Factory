@@ -2,6 +2,7 @@
   "name": "dioli-dropshipping-factory",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "engines": {
     "node": ">=20.9.0"
   },
@@ -9,7 +10,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --test tests/*.test.mjs",
+    "check": "npm run lint && npm run test && npm run build",
+    "db:verify": "node scripts/verify-migrations.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.47.0",
