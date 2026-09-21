@@ -48,7 +48,7 @@ econômica ou externa pode ocorrer implicitamente.
 - [D] Escolher fornecedor, canal, marcas e provedores externos ao final.
 - [-] Arquitetura de produção com PostgreSQL, migrations e autenticação; workers e storage pendentes.
 - [x] Criar schema relacional extensível e migrations versionadas.
-- [ ] Implementar papéis, permissões e princípio do menor privilégio.
+- [-] Papéis ADMIN/APPROVER e menor privilégio nas mutações; IdP individual permanece pendente.
 - [x] Criar IDs de correlação, idempotência e contrato base de eventos/outbox.
 - [-] Produção configurada sem segredos no código; local e preview ainda precisam padronização.
 
@@ -59,7 +59,7 @@ econômica ou externa pode ocorrer implicitamente.
 - [x] Busca e estados CANDIDATO, TRIADO, APROVADO, REJEITADO e ARQUIVADO.
 - [x] Justificativa obrigatória e histórico antes/depois.
 - [x] Garantir que cadastro não inicie produção.
-- [-] Persistência compartilhada no PostgreSQL; falta modelagem transacional relacional.
+- [x] Projetar Intake transacionalmente no schema relacional, preservando o bridge compatível.
 - [ ] Registrar origem MANUAL/TREND, região, categoria e evidências.
 - [ ] Implementar comparação de duplicidades e solicitação de informação.
 - [ ] Adicionar filtros completos e snapshots imutáveis de decisão.
@@ -72,11 +72,11 @@ econômica ou externa pode ocorrer implicitamente.
 - [x] Campos editoriais essenciais, tags, categoria e completude.
 - [x] Versionar alterações e impedir duplicidade por candidato.
 - [x] Bloquear PRONTO enquanto faltarem campos ou mídia aprovada.
-- [ ] Completar schema universal: variantes, SKUs, atributos, materiais, cores,
+- [-] Schema universal suporta variantes, SKUs, atributos, materiais, cores,
   tamanhos, dimensões, peso, GTIN/EAN, SEO, compliance e localização.
 - [ ] Criar taxonomia hierárquica extensível e atributos por categoria.
-- [ ] Implementar diferenças e restauração entre versões.
-- [ ] Declarar gaps por destino sem contaminar o schema central.
+- [x] Preservar snapshots e restaurar versões do Master Product.
+- [x] Declarar gaps por destino sem contaminar o schema central.
 - [ ] Testes E2E do candidato aprovado até produto pronto.
 
 ## B3 — Media Factory
@@ -84,7 +84,7 @@ econômica ou externa pode ocorrer implicitamente.
 - [x] Registrar mídia original e derivada separadamente.
 - [x] Exigir finalidade, proveniência e revisão explícita.
 - [x] Preservar ativos rejeitados no histórico controlado.
-- [ ] Upload para object storage, checksums e metadados do arquivo.
+- [-] Upload persistente com checksum e metadados concluído no PostgreSQL; provider externo adiado.
 - [ ] Versões, direitos de uso, formatos e proporções por destino.
 - [ ] Jobs controlados de transformação de imagem e vídeo.
 - [ ] Comparação visual e aprovação de derivados.
@@ -104,18 +104,18 @@ econômica ou externa pode ocorrer implicitamente.
 - [x] Preço sugerido, preço mínimo seguro e Margin Guard.
 - [x] Bloquear margem alvo inferior à mínima e cálculo inviável.
 - [x] Interface de simulação somente para produtos prontos.
-- [ ] Contextos por oferta, moeda, país, marca, loja e canal.
-- [ ] FX, impostos e tarifas como fontes versionadas.
-- [ ] Análise de impacto e quarentena para mudanças anômalas.
-- [ ] Aprovação explícita antes de propagar qualquer preço.
+- [x] Contextos por oferta, moeda, país, loja e canal.
+- [-] FX e impostos entram no cálculo versionado; fontes externas permanecem adiadas.
+- [x] Análise de impacto e quarentena para mudanças superiores a 30%.
+- [x] Aprovação explícita antes de propagar qualquer preço.
 - [ ] Testes de precisão, arredondamento e cenários-limite.
 
 ## B6 — Auditoria, eventos e observabilidade
 
 - [x] Linha do tempo agregando decisões, produto, mídia e pricing.
 - [-] Audit trail imutável no backend; identidade individual via IdP ainda pendente.
-- [-] Outbox transacional criada; worker, retries e dead-letter operacional pendentes.
-- [ ] Estado stale, falhas, latência, filas e saúde operacional visíveis.
+- [x] Outbox transacional com worker, retry exponencial e estado DEAD.
+- [-] API operacional expõe stale, falhas, latência, filas e saúde; alertas externos pendentes.
 - [ ] Navegação causal entre evento, cálculo, job e entidade afetada.
 - [ ] Alertas e runbooks de recuperação.
 
@@ -124,8 +124,8 @@ econômica ou externa pode ocorrer implicitamente.
 - [x] Indicadores operacionais derivados dos dados disponíveis.
 - [x] Exibir ausência de dados comerciais como “sem dados”, nunca zero.
 - [ ] Modelo analítico por produto, oferta, origem, categoria e período.
-- [ ] Receita, custo, contribuição e margem reconciliáveis.
-- [ ] Termômetro com janela e evidência: acelerando, estável, desacelerando.
+- [x] Receita, custo, contribuição e margem derivados de pedidos enviados.
+- [x] Termômetro com janela e evidência: acelerando, estável, desacelerando.
 - [ ] Feedback informativo para Trends e Triagem sem ação automática.
 
 ## B8 — Connectors simulados
@@ -133,7 +133,7 @@ econômica ou externa pode ocorrer implicitamente.
 - [x] Definir contratos neutros e capability mapping para a prova controlada.
 - [-] Supplier Adapter simulado; custo/estoque/logística reais não conectados.
 - [-] Channel Adapter simulado com sincronização idempotente; listing real ausente.
-- [-] Simular falhas e recuperação; stale e política completa de retries pendentes.
+- [x] Simular falhas, recovery, tentativas e estado stale por connector.
 - [x] Provar que a falha de um adapter não derruba o núcleo.
 
 ## B9 — Fornecedores, canais e marcas reais — decisão final
@@ -149,13 +149,13 @@ econômica ou externa pode ocorrer implicitamente.
 
 - [x] Pedido controlado, normalizado e idempotente com snapshot econômico.
 - [-] Ciclo simulado de pedido até envio/tracking; fulfillment externo real pendente.
-- [ ] Fila de exceções: estoque, custo, endereço, recusa e cancelamento.
+- [x] Fila controlada de exceções com motivo, estado anterior e resolução.
 - [ ] PII com acesso mínimo e política de retenção.
 - [ ] Prova real canal → DDF → fornecedor → tracking → canal.
 
 ## B11 — Qualidade, segurança e entrega Railway
 
-- [x] Lint, build de produção e 14 testes de domínio aprovados.
+- [x] Lint, build de produção e 18 testes de domínio aprovados.
 - [ ] Testes unitários completos, integração, E2E e acessibilidade.
 - [-] QA funcional nos fluxos principais; matriz visual desktop/mobile e estados especiais pendente.
 - [-] Basic Auth, threat model, headers e rate limiting concluídos; IdP/sessão e schemas runtime pendentes.

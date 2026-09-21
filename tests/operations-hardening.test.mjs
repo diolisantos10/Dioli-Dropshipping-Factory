@@ -1,0 +1,5 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import{emptyOrders,receiveOrder,flagOrderException,resolveOrderException}from'../src/lib/orders.ts';
+import{emptyConnectors,simulateSync,isConnectorStale}from'../src/lib/connectors.ts';
+test('exceção de pedido preserva estado e pode ser resolvida',()=>{let s=receiveOrder(emptyOrders,{externalOrderId:'EXT-2',productId:'p',salePrice:100,costSnapshot:50,currency:'BRL'},'o','2026-01-01T00:00:00Z');s=flagOrderException(s,'o','Estoque divergente','2026-01-01T00:01:00Z');assert.equal(s.orders[0].status,'EXCECAO');assert.equal(s.orders[0].previousStatus,'RECEBIDO');s=resolveOrderException(s,'o','2026-01-01T00:02:00Z');assert.equal(s.orders[0].status,'RECEBIDO');assert.equal(s.orders[0].exceptionReason,undefined)});
+test('connector registra retry e janela stale',()=>{const s=simulateSync(emptyConnectors,'supplier-simulator','retry-1','2026-01-01T00:00:00Z',true);const c=s.connectors[0];assert.equal(c.health,'DEGRADED');assert.equal(c.attempts,1);assert.equal(isConnectorStale(c,'2026-01-01T00:10:00Z'),false);assert.equal(isConnectorStale(c,'2026-01-01T00:20:00Z'),true)});

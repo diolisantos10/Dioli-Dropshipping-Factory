@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import { randomUUID } from 'node:crypto';
 import { runMigrations } from './migrations';
+import { projectState } from './state-projector';
 
 const globalForDb = globalThis as unknown as { ddfPool?: Pool; ddfReady?: Promise<void> };
 const pool = globalForDb.ddfPool ?? new Pool({ connectionString: process.env.DATABASE_URL, max: 5, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined });
@@ -22,6 +23,11 @@ async function ready() {
         revision bigint NOT NULL DEFAULT 1,
         updated_at timestamptz NOT NULL DEFAULT now()
       )`);
+      const existing = await client.query('SELECT namespace, payload FROM ddf_state');
+      for (const namespace of ['intake','products','media','pricing','orders'] as StateNamespace[]) {
+        const row = existing.rows.find((item) => item.namespace === namespace);
+        if (row) await projectState(client, namespace, row.payload, 'system:migration');
+      }
     } finally { client.release(); }
   })();
   return globalForDb.ddfReady;
@@ -42,6 +48,7 @@ export async function writeState(namespace: StateNamespace, payload: unknown, ex
       : await client.query(`UPDATE ddf_state SET payload=$2, revision=revision+1, updated_at=now()
           WHERE namespace=$1 AND revision=$3 RETURNING payload, revision, updated_at`, [namespace, JSON.stringify(payload), expectedRevision]);
     if (!result.rows[0]) { await client.query('ROLLBACK'); return null; }
+    await projectState(client, namespace, payload, actor);
     await client.query(`INSERT INTO audit_events(id,actor,action,entity_type,entity_id,correlation_id,before_state,after_state,metadata)
       VALUES($1,$2,'STATE_UPDATED','STATE_NAMESPACE',$3,$4,$5,$6,$7)`, [
       randomUUID(), actor, namespace, correlationId, before.rows[0]?.payload ?? null, payload,
@@ -52,6 +59,7 @@ export async function writeState(namespace: StateNamespace, payload: unknown, ex
       randomUUID(), namespace, JSON.stringify({ namespace, revision: Number(result.rows[0].revision), correlationId }), `${namespace}:${result.rows[0].revision}`,
     ]);
     await client.query('COMMIT');
+    await drainOutbox(20).catch(() => undefined);
     return result.rows[0];
   } catch (error) {
     await client.query('ROLLBACK');
@@ -72,4 +80,43 @@ export async function listAuditEvents(limit = 100) {
     entity_id AS "entityId", correlation_id AS "correlationId", reason, before_state AS "beforeState",
     after_state AS "afterState", metadata FROM audit_events ORDER BY occurred_at DESC LIMIT $1`, [Math.min(Math.max(limit, 1), 500)]);
   return result.rows;
+}
+
+export async function drainOutbox(limit = 20) {
+  await ready();
+  const client = await pool.connect();
+  let published = 0; let failed = 0;
+  try {
+    await client.query('BEGIN');
+    const result = await client.query(`SELECT * FROM outbox_events
+      WHERE status IN ('PENDING','FAILED') AND available_at <= now()
+      ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT $1`, [Math.min(Math.max(limit,1),100)]);
+    for (const event of result.rows) {
+      try {
+        if (event.topic !== 'ddf.state.updated') throw new Error(`Tópico sem handler: ${event.topic}`);
+        await client.query(`UPDATE outbox_events SET status='PUBLISHED',attempts=attempts+1,published_at=now(),last_error=NULL WHERE id=$1`,[event.id]);
+        published += 1;
+      } catch (error) {
+        const attempts = Number(event.attempts) + 1;
+        const status = attempts >= 5 ? 'DEAD' : 'FAILED';
+        await client.query(`UPDATE outbox_events SET status=$2,attempts=$3,last_error=$4,
+          available_at=now() + make_interval(secs => LEAST(300, power(2,$3)::int)) WHERE id=$1`,
+          [event.id,status,attempts,error instanceof Error?error.message:'Falha desconhecida']);
+        failed += 1;
+      }
+    }
+    await client.query('COMMIT');
+    return { processed: result.rowCount ?? 0, published, failed };
+  } catch (error) { await client.query('ROLLBACK'); throw error; }
+  finally { client.release(); }
+}
+
+export async function operationalStatus() {
+  await ready();
+  const [outbox, audit, state] = await Promise.all([
+    pool.query(`SELECT status,count(*)::int AS count FROM outbox_events GROUP BY status`),
+    pool.query(`SELECT count(*)::int AS count,max(occurred_at) AS latest FROM audit_events`),
+    pool.query(`SELECT namespace,revision,updated_at AS "updatedAt" FROM ddf_state ORDER BY namespace`),
+  ]);
+  return { outbox: Object.fromEntries(outbox.rows.map(row=>[row.status,row.count])), audit: audit.rows[0], state: state.rows };
 }

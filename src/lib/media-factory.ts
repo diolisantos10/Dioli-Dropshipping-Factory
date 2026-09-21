@@ -1,6 +1,6 @@
 export type MediaKind = 'ORIGINAL' | 'DERIVADA';
 export type MediaStatus = 'EM_REVISAO' | 'APROVADA' | 'REJEITADA';
-export type MediaAsset = { id: string; productId: string; url: string; kind: MediaKind; purpose: string; provenance: string; status: MediaStatus; createdAt: string };
+export type MediaAsset = { id: string; productId: string; url: string; kind: MediaKind; purpose: string; provenance: string; status: MediaStatus; createdAt: string; checksum?: string; mimeType?: string; bytes?: number };
 export type MediaState = { version: 1; assets: MediaAsset[] };
 export const MEDIA_STORAGE_KEY = 'ddf.media.demo.v1';
 export const emptyMedia: MediaState = { version: 1, assets: [] };

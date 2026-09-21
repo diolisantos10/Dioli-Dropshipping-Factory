@@ -7,6 +7,8 @@ export async function GET(_: Request, { params }: { params: Promise<{ namespace:
   catch { return Response.json({ error: 'Persistência indisponível.' }, { status: 503 }); }
 }
 export async function PUT(request: Request, { params }: { params: Promise<{ namespace: string }> }) {
+  const role = request.headers.get('x-ddf-role') || (process.env.NODE_ENV === 'production' ? '' : 'ADMIN');
+  if (!['ADMIN','APPROVER'].includes(role)) return Response.json({ error: 'Permissão insuficiente.' }, { status: 403 });
   const { namespace } = await params; if (!isStateNamespace(namespace)) return Response.json({ error: 'Namespace inválido.' }, { status: 404 });
   const length = Number(request.headers.get('content-length') ?? 0); if (length > 2_000_000) return Response.json({ error: 'Payload excede o limite.' }, { status: 413 });
   try { const body = await request.json(); if (!body || typeof body !== 'object' || !('payload' in body)) return Response.json({ error: 'Payload inválido.' }, { status: 400 });

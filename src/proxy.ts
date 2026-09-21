@@ -47,6 +47,7 @@ export function proxy(request: NextRequest) {
         attempts.delete(client);
         const requestHeaders = new Headers(request.headers);
         requestHeaders.set('x-ddf-actor', user);
+        requestHeaders.set('x-ddf-role', process.env.DDF_ADMIN_ROLE || 'ADMIN');
         requestHeaders.set('x-correlation-id', correlationId);
         return withSecurityHeaders(NextResponse.next({ request: { headers: requestHeaders } }), correlationId);
       }
