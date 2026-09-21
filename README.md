@@ -46,6 +46,7 @@ Open `http://127.0.0.1:3000`. The explicit hostname avoids network-interface dis
 ```bash
 npm run lint
 npm test
+npm run test:e2e
 npm run db:verify
 npm run build
 npm audit --omit=dev

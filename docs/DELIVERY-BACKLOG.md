@@ -156,7 +156,7 @@ econômica ou externa pode ocorrer implicitamente.
 ## B11 — Qualidade, segurança e entrega Railway
 
 - [x] Lint, build de produção e 18 testes de domínio aprovados.
-- [ ] Testes unitários completos, integração, E2E e acessibilidade.
+- [-] 18 testes de domínio e E2E de autenticação, 11 rotas, landmarks e API; auditoria visual avançada pendente.
 - [-] QA funcional nos fluxos principais; matriz visual desktop/mobile e estados especiais pendente.
 - [-] Basic Auth, threat model, headers e rate limiting concluídos; IdP/sessão e schemas runtime pendentes.
 - [-] Plano de backup, restauração e rollback documentado; restore drill ainda pendente.

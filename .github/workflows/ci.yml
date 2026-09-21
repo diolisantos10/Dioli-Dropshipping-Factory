@@ -21,4 +21,5 @@ jobs:
       - run: npm ci
       - run: npm run db:verify
       - run: npm run check
+      - run: npm run test:e2e
       - run: npm audit --omit=dev --audit-level=high
