@@ -1,30 +1,56 @@
 # DDF — Backlog mestre de entrega
 
-Fonte de verdade: `DDF-BLUEPRINT/`. Ordem baseada em dependências, não em datas.
-Responsável inicial pelas aprovações: proprietário da DDF. Fornecedores, canais,
-marcas e provedores reais permanecem adiados até a validação da fábrica.
+Atualizado em 21/09/2026. Fonte de verdade funcional: `DDF-BLUEPRINT/`.
+A ordem abaixo segue dependências, não datas.
 
-## Definição global de pronto
+Legenda: `[x]` concluído · `[-]` entregue de forma controlada, mas ainda requer
+hardening/expansão · `[ ]` pendente · `[D]` decisão deliberadamente adiada.
 
-A DDF só será considerada entregue quando o fluxo controlado funcionar de ponta
-a ponta, estiver persistido em banco compartilhado, possuir autenticação e
-autorização, auditoria de negócio, testes, observabilidade, documentação e uma
-implantação validada no Railway. Nenhum dado demonstrativo poderá ser apresentado
-como produção e nenhuma ação econômica ou externa poderá ocorrer implicitamente.
+## Estado executivo
+
+### Entregue — Factory-first controlada
+
+- Aplicação DDF responsiva em Next.js/TypeScript, publicada no Railway.
+- Fluxo funcional de Intake → aprovação → Product Factory → mídia → produto
+  pronto → pricing, com guardrails e histórico.
+- Catálogo de produtos disponíveis, Intelligence Room e auditoria agregada.
+- Connectors neutros simulados, sincronização idempotente e isolamento de falha.
+- Pedido controlado/idempotente, snapshot econômico e ciclo até tracking.
+- Estado compartilhado no PostgreSQL, autenticação Basic, endpoint de saúde e TLS.
+- Lint, build e 14 testes de domínio aprovados.
+
+### Ainda necessário para a DDF completa de produção
+
+- Modelagem relacional transacional e migrations; hoje o PostgreSQL persiste o
+  estado compartilhado como documento JSON versionado.
+- Autenticação por sessão, papéis/permissões, trilha imutável e segurança avançada.
+- Schema universal completo, storage real de mídia e jobs assíncronos.
+- Pricing multicontexto e Intelligence comercial reconciliável.
+- Fornecedor, canal, marcas e provedores reais — mantidos em aberto por decisão.
+- Fluxo externo real de pedido/fulfillment/tracking, CI/E2E, backups, alertas,
+  runbooks e aceite final.
+
+## Definição de pronto
+
+O marco **Factory-first controlado** está entregue. A **DDF completa de produção**
+só estará entregue quando os cinco portões ao final deste documento estiverem
+concluídos, inclusive integrações reais, segurança, recuperação e aceite formal.
+Nenhum dado demonstrativo deve ser apresentado como produção, e nenhuma ação
+econômica ou externa pode ocorrer implicitamente.
 
 ## B0 — Arquitetura e fundação
 
 - [x] Ler e adotar integralmente o blueprint funcional oficial.
 - [x] Separar a nova DDF do MVP legado.
 - [x] Criar aplicação Next.js, TypeScript e design base responsivo.
-- [x] Definir navegação e arquitetura de informação da Control Room.
+- [x] Definir navegação e arquitetura de informação da DDF.
 - [x] Registrar proprietário inicial das aprovações.
-- [x] Adiar escolhas de fornecedor, canal, marca e provedores externos.
-- [ ] Definir arquitetura de produção: banco, ORM, autenticação, filas e storage.
+- [D] Escolher fornecedor, canal, marcas e provedores externos ao final.
+- [-] Arquitetura de produção com PostgreSQL e autenticação; ORM, filas e storage pendentes.
 - [ ] Criar schema relacional e migrations versionadas.
 - [ ] Implementar papéis, permissões e princípio do menor privilégio.
-- [ ] Criar IDs de correlação, idempotência e contrato de eventos.
-- [ ] Configurar ambientes local, preview e produção sem segredos no código.
+- [-] IDs de correlação e idempotência existem nos fluxos simulados; contrato de eventos pendente.
+- [-] Produção configurada sem segredos no código; local e preview ainda precisam padronização.
 
 ## B1 — Intake e Portfolio Gate
 
@@ -33,7 +59,7 @@ como produção e nenhuma ação econômica ou externa poderá ocorrer implicita
 - [x] Busca e estados CANDIDATO, TRIADO, APROVADO, REJEITADO e ARQUIVADO.
 - [x] Justificativa obrigatória e histórico antes/depois.
 - [x] Garantir que cadastro não inicie produção.
-- [ ] Migrar persistência do navegador para banco transacional.
+- [-] Persistência compartilhada no PostgreSQL; falta modelagem transacional relacional.
 - [ ] Registrar origem MANUAL/TREND, região, categoria e evidências.
 - [ ] Implementar comparação de duplicidades e solicitação de informação.
 - [ ] Adicionar filtros completos e snapshots imutáveis de decisão.
@@ -86,9 +112,9 @@ como produção e nenhuma ação econômica ou externa poderá ocorrer implicita
 
 ## B6 — Auditoria, eventos e observabilidade
 
-- [x] Linha do tempo local agregando decisões, produto, mídia e pricing.
-- [ ] Audit trail imutável no backend com ator, antes/depois e justificativa.
-- [ ] Outbox/event bus, idempotency keys, retries e dead-letter queue.
+- [x] Linha do tempo agregando decisões, produto, mídia e pricing.
+- [-] Histórico compartilhado; falta audit trail imutável com identidade forte do ator.
+- [ ] Outbox/event bus, retries e dead-letter queue.
 - [ ] Estado stale, falhas, latência, filas e saúde operacional visíveis.
 - [ ] Navegação causal entre evento, cálculo, job e entidade afetada.
 - [ ] Alertas e runbooks de recuperação.
@@ -104,39 +130,39 @@ como produção e nenhuma ação econômica ou externa poderá ocorrer implicita
 
 ## B8 — Connectors simulados
 
-- [ ] Definir contratos universais e capability mapping.
-- [ ] Criar Supplier Adapter simulado com custo, estoque e logística.
-- [ ] Criar Channel Adapter simulado com listing idempotente.
-- [ ] Simular custo/estoque stale, falhas, retries e recuperação.
-- [ ] Provar que falha de um adapter não derruba o núcleo.
+- [x] Definir contratos neutros e capability mapping para a prova controlada.
+- [-] Supplier Adapter simulado; custo/estoque/logística reais não conectados.
+- [-] Channel Adapter simulado com sincronização idempotente; listing real ausente.
+- [-] Simular falhas e recuperação; stale e política completa de retries pendentes.
+- [x] Provar que a falha de um adapter não derruba o núcleo.
 
 ## B9 — Fornecedores, canais e marcas reais — decisão final
 
-- [ ] Selecionar primeiro fornecedor e canal após aprovação da fábrica.
-- [ ] Selecionar provedores de IA/mídia e regras comerciais.
-- [ ] Definir associações de Santioh, Dilee, Dilix e Queise sem hardcode.
+- [D] Selecionar primeiro fornecedor e canal após aprovação da fábrica.
+- [D] Selecionar provedores de IA/mídia e regras comerciais.
+- [D] Definir associações de Santioh, Dilee, Dilix e Queise sem hardcode.
 - [ ] Configurar credenciais por ambiente e rotação segura.
 - [ ] Implementar primeiro adapter oficial de fornecedor.
 - [ ] Implementar primeiro adapter oficial de canal.
 
 ## B10 — Pedidos, fulfillment e tracking
 
-- [ ] Pedido normalizado e idempotente com snapshot econômico.
-- [ ] Supplier Order, fulfillment, shipment e tracking ponta a ponta.
+- [x] Pedido controlado, normalizado e idempotente com snapshot econômico.
+- [-] Ciclo simulado de pedido até envio/tracking; fulfillment externo real pendente.
 - [ ] Fila de exceções: estoque, custo, endereço, recusa e cancelamento.
 - [ ] PII com acesso mínimo e política de retenção.
-- [ ] Prova canal → DDF → fornecedor → tracking → canal.
+- [ ] Prova real canal → DDF → fornecedor → tracking → canal.
 
 ## B11 — Qualidade, segurança e entrega Railway
 
-- [x] Lint, build de produção e testes de domínio atuais aprovados.
+- [x] Lint, build de produção e 14 testes de domínio aprovados.
 - [ ] Testes unitários completos, integração, E2E e acessibilidade.
-- [ ] QA visual desktop/mobile e estados vazio/loading/error/blocked/stale.
-- [ ] Threat model, validação de entrada, headers e rate limiting.
+- [-] QA funcional nos fluxos principais; matriz visual desktop/mobile e estados especiais pendente.
+- [-] Basic Auth e validações básicas; threat model, sessão, headers e rate limiting pendentes.
 - [ ] Backups, restauração testada e plano de migrations/rollback.
 - [ ] CI com gates obrigatórios e preview por branch.
-- [ ] Configurar projeto/serviços/variáveis no Railway.
-- [ ] Deploy, smoke tests, domínio, TLS e observabilidade.
+- [x] Projeto, aplicação, PostgreSQL e variáveis configurados no Railway.
+- [-] Deploy, smoke tests, domínio, TLS e health concluídos; observabilidade completa pendente.
 - [ ] Documentação operacional e aceite final do proprietário.
 
 ## Portões de liberação
@@ -144,5 +170,5 @@ como produção e nenhuma ação econômica ou externa poderá ocorrer implicita
 1. **Factory Core:** B0–B7 completos com dados controlados.
 2. **Proof of Architecture:** B8 completo sem dependência de fornecedor/canal real.
 3. **External Pilot:** decisões e integrações de B9 aprovadas.
-4. **Operations Pilot:** B10 validado ponta a ponta.
+4. **Operations Pilot:** B10 validado ponta a ponta com serviços reais.
 5. **Production Release:** B11 completo e aceite formal registrado.
