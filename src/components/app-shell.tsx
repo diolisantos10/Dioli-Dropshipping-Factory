@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { ServerStateBridge } from "@/components/server-state-bridge";
 import { Bell, Menu, Search, ShieldCheck, X } from "lucide-react";
 import { useState } from "react";
 import { flatNavigation, navigationGroups } from "@/lib/factory-navigation";
@@ -13,6 +14,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="app-shell">
+      <ServerStateBridge />
       <aside className="side-rail" data-open={navigationOpen} aria-label="Navegação principal">
         <div className="flex min-h-full flex-col px-4 py-5">
           <div className="mb-8 flex items-center justify-between px-2">
