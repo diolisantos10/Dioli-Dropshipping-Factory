@@ -74,7 +74,7 @@ econômica ou externa pode ocorrer implicitamente.
 - [x] Bloquear PRONTO enquanto faltarem campos ou mídia aprovada.
 - [-] Schema universal suporta variantes, SKUs, atributos, materiais, cores,
   tamanhos, dimensões, peso, GTIN/EAN, SEO, compliance e localização.
-- [ ] Criar taxonomia hierárquica extensível e atributos por categoria.
+- [x] Criar taxonomia hierárquica extensível e atributos por categoria.
 - [x] Preservar snapshots e restaurar versões do Master Product.
 - [x] Declarar gaps por destino sem contaminar o schema central.
 - [ ] Testes E2E do candidato aprovado até produto pronto.
@@ -155,8 +155,8 @@ econômica ou externa pode ocorrer implicitamente.
 
 ## B11 — Qualidade, segurança e entrega Railway
 
-- [x] Lint, build de produção e 19 testes de domínio aprovados.
-- [-] 19 testes de domínio e E2E de autenticação, 11 rotas, landmarks e API; auditoria visual avançada pendente.
+- [x] Lint, build de produção e 20 testes de domínio aprovados.
+- [-] 20 testes de domínio e E2E de autenticação, 11 rotas, landmarks e API; auditoria visual avançada pendente.
 - [-] QA funcional nos fluxos principais; matriz visual desktop/mobile e estados especiais pendente.
 - [-] Basic Auth, threat model, headers e rate limiting concluídos; IdP/sessão e schemas runtime pendentes.
 - [-] Plano de backup, restauração e rollback documentado; restore drill ainda pendente.
