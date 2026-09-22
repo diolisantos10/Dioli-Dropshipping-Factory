@@ -23,3 +23,4 @@ test('URL inválida, credenciais e duplicatas são rejeitadas', () => {
   for (const url of ['javascript:alert(1)', 'https://user:secret@example.com', 'invalid']) assert.throws(() => addCandidate(emptyIntake, {name: 'Item', url, notes: ''}, 'c2', at));
   assert.throws(() => addCandidate(created(), {name: 'Outro', url: 'https://example.com/item#fragment', notes: ''}, 'c2', at));
 });
+test('origem, região, categoria e evidências são preservadas',()=>{const state=addCandidate(emptyIntake,{name:'Trend Brasil',url:'https://example.com/trend',notes:'Sinal validado',source:'TREND',region:'BR',category:'Casa',evidence:['Busca crescente','Fonte pública']},'trend-1','2026-01-01T00:00:00Z');const candidate=state.candidates[0];assert.equal(candidate.source,'TREND');assert.equal(candidate.region,'BR');assert.equal(candidate.category,'Casa');assert.deepEqual(candidate.evidence,['Busca crescente','Fonte pública'])});

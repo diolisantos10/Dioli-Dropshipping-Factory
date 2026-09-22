@@ -60,8 +60,8 @@ econômica ou externa pode ocorrer implicitamente.
 - [x] Justificativa obrigatória e histórico antes/depois.
 - [x] Garantir que cadastro não inicie produção.
 - [x] Projetar Intake transacionalmente no schema relacional, preservando o bridge compatível.
-- [ ] Registrar origem MANUAL/TREND, região, categoria e evidências.
-- [ ] Implementar comparação de duplicidades e solicitação de informação.
+- [x] Registrar origem MANUAL/TREND, região, categoria e evidências.
+- [-] Comparar duplicidades por URL, nome e domínio; solicitação formal de informação permanece pendente.
 - [ ] Adicionar filtros completos e snapshots imutáveis de decisão.
 - [ ] Testes E2E do portão de aprovação.
 
@@ -155,8 +155,8 @@ econômica ou externa pode ocorrer implicitamente.
 
 ## B11 — Qualidade, segurança e entrega Railway
 
-- [x] Lint, build de produção e 18 testes de domínio aprovados.
-- [-] 18 testes de domínio e E2E de autenticação, 11 rotas, landmarks e API; auditoria visual avançada pendente.
+- [x] Lint, build de produção e 19 testes de domínio aprovados.
+- [-] 19 testes de domínio e E2E de autenticação, 11 rotas, landmarks e API; auditoria visual avançada pendente.
 - [-] QA funcional nos fluxos principais; matriz visual desktop/mobile e estados especiais pendente.
 - [-] Basic Auth, threat model, headers e rate limiting concluídos; IdP/sessão e schemas runtime pendentes.
 - [-] Plano de backup, restauração e rollback documentado; restore drill ainda pendente.

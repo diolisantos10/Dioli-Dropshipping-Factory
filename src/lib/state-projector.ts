@@ -19,10 +19,10 @@ const stableUuid = (value: string) => {
 export async function projectState(client: PoolClient, namespace: StateNamespace, payload: unknown, actor: string) {
   if (namespace === 'intake') {
     for (const row of records(payload, 'candidates')) await client.query(`INSERT INTO raw_candidates
-      (id,source,source_url,normalized_url,name,notes,status,created_at,updated_at)
-      VALUES($1,'MANUAL',$2,$2,$3,$4,$5,$6,$6)
-      ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,notes=EXCLUDED.notes,status=EXCLUDED.status,updated_at=EXCLUDED.updated_at`,
-      [text(row,'id'),text(row,'url'),text(row,'name'),text(row,'notes'),text(row,'status','CANDIDATO'),date(row,'createdAt')]);
+      (id,source,source_url,normalized_url,name,notes,region,category_hint,evidence,status,created_at,updated_at)
+      VALUES($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,$10)
+      ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,notes=EXCLUDED.notes,region=EXCLUDED.region,category_hint=EXCLUDED.category_hint,evidence=EXCLUDED.evidence,status=EXCLUDED.status,updated_at=EXCLUDED.updated_at`,
+      [text(row,'id'),text(row,'source','MANUAL'),text(row,'url'),text(row,'name'),text(row,'notes'),text(row,'region')||null,text(row,'category')||null,JSON.stringify(row.evidence??[]),text(row,'status','CANDIDATO'),date(row,'createdAt')]);
     for (const row of records(payload, 'events')) await client.query(`INSERT INTO triage_decisions
       (id,candidate_id,before_status,after_status,reason,actor,decided_at) VALUES($1,$2,$3,$4,$5,$6,$7)
       ON CONFLICT(id) DO NOTHING`,[stableUuid(text(row,'id')),text(row,'candidateId'),row.before??null,text(row,'after'),text(row,'reason'),text(row,'actor',actor),date(row,'at')]);
