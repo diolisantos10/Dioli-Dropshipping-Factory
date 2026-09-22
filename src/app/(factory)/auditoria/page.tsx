@@ -1,3 +1,3 @@
-import { AuditWorkspace } from '@/components/operations-workspaces';
+import { ObservabilityWorkspace } from '@/components/observability-workspace';
 export const metadata = { title: 'Auditoria' };
-export default function Page() { return <AuditWorkspace />; }
+export default function Page() { return <ObservabilityWorkspace />; }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { emptyProductFactory, markProductReady, productGaps, restoreProductVersion, startProduct, updateProduct } from '../src/lib/product-factory.ts';
+import { emptyProductFactory, markProductReady, productGaps, productVersionDiff, restoreProductVersion, startProduct, updateProduct } from '../src/lib/product-factory.ts';
 
 const approved = { id: 'candidate-1', name: 'Produto teste', url: 'https://example.com/', notes: 'Origem controlada', status: 'APROVADO', createdAt: '2026-01-01T00:00:00Z' };
 
@@ -37,3 +37,4 @@ test('cadastro completo gera versão pronta sem fornecedor ou publicação', () 
   assert.equal('supplierOffer' in state.products[0], false);
   assert.equal('published' in state.products[0], false);
 });
+test('comparação de versões informa campos alterados',()=>{let state=startProduct(emptyProductFactory,approved,'diff','2026-01-01T00:00:00Z');const before=state.products[0];state=updateProduct(state,'diff',{universalTitle:'Novo título',category:'Casa',shortDescription:'Curta',longDescription:'Longa',bullets:['1','2','3'],benefits:['1','2'],tags:['nova']},'2026-01-01T00:01:00Z');const changes=productVersionDiff(before,state.products[0]);assert.ok(changes.some(item=>item.field==='Título'&&item.after==='Novo título'));assert.ok(changes.some(item=>item.field==='Categoria'))});

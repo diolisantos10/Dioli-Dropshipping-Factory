@@ -2,7 +2,7 @@
 
 import { useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
-import { addCandidate, emptyIntake, INTAKE_STORAGE_KEY, transitionCandidate, type CandidateStatus, type IntakeState } from '@/lib/intake';
+import { addCandidate, emptyIntake, filterCandidates, INTAKE_STORAGE_KEY, transitionCandidate, type CandidateSource, type CandidateStatus, type IntakeState } from '@/lib/intake';
 
 const key = INTAKE_STORAGE_KEY;
 function subscribe(callback: () => void) {
@@ -13,7 +13,7 @@ function subscribe(callback: () => void) {
 function snapshot() {
   try { return localStorage.getItem(key) ?? ''; } catch { return 'unavailable'; }
 }
-const labels: Record<CandidateStatus, string> = { CANDIDATO: 'Na prateleira', TRIADO: 'Aguardando decisão', APROVADO: 'Aprovado', REJEITADO: 'Rejeitado', ARQUIVADO: 'Arquivado' };
+const labels: Record<CandidateStatus, string> = { CANDIDATO: 'Na prateleira', TRIADO: 'Aguardando decisão', INFORMACAO_SOLICITADA: 'Informação solicitada', APROVADO: 'Aprovado', REJEITADO: 'Rejeitado', ARQUIVADO: 'Arquivado' };
 export function IntakeWorkspace({ mode }: { mode: 'intake' | 'triage' | 'audit' | 'overview' }) {
   const raw = useSyncExternalStore(subscribe, snapshot, () => null);
   let state: IntakeState = emptyIntake;
@@ -31,6 +31,9 @@ export function IntakeWorkspace({ mode }: { mode: 'intake' | 'triage' | 'audit' 
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [query, setQuery] = useState('');
+  const [source, setSource] = useState<CandidateSource | ''>('');
+  const [region, setRegion] = useState(''); const [category, setCategory] = useState('');
+  const [status, setStatus] = useState<CandidateStatus | ''>(''); const [from, setFrom] = useState(''); const [to, setTo] = useState('');
   const [decision, setDecision] = useState<{ id: string; status: CandidateStatus } | null>(null);
   function persist(next: IntakeState) {
     if (snapshot() !== raw) throw new Error('Os dados mudaram em outra aba. Revise a lista antes de repetir a ação.');
@@ -38,7 +41,8 @@ export function IntakeWorkspace({ mode }: { mode: 'intake' | 'triage' | 'audit' 
     window.dispatchEvent(new Event('ddf-intake-change'));
     setError('');
   }
-  const candidates = state.candidates.filter(c => (mode !== 'triage' || c.status === 'TRIADO') && `${c.name} ${c.url}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  const candidates = filterCandidates(state.candidates, { query, source, region, category, status: mode === 'triage' ? (status || undefined) : status, from, to })
+    .filter(c => mode !== 'triage' || ['TRIADO', 'INFORMACAO_SOLICITADA'].includes(c.status));
   return <div className="space-y-6">
     <header><p className="eyebrow">{mode === 'audit' ? 'Histórico de decisões' : 'Entrada → triagem → aprovação'}</p><h1 className="display-title">{mode === 'overview' ? 'Sua fábrica, em movimento.' : mode === 'intake' ? 'Prateleira Bruta' : mode === 'triage' ? 'Sala de Triagem' : 'Auditoria'}</h1></header>
     <p className="surface p-4 text-sm">Dados sincronizados com o PostgreSQL e auditados. Aprovações continuam explícitas e não iniciam processamento externo.</p>
@@ -59,7 +63,13 @@ export function IntakeWorkspace({ mode }: { mode: 'intake' | 'triage' | 'audit' 
         <button className="ddf-button" type="submit">Cadastrar candidato</button>
       </form>}
       {mode === 'overview' ? null : mode !== 'audit' ? <>
-        <label className="block">Buscar candidatos<input className="ddf-input" value={query} onChange={e => setQuery(e.target.value)} placeholder="Nome ou URL" /></label>
+        <section className="surface grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="Filtros de candidatos">
+          <label className="lg:col-span-2">Buscar<input className="ddf-input" value={query} onChange={e => setQuery(e.target.value)} placeholder="Nome, URL ou observação" /></label>
+          <label>Origem<select className="ddf-input" value={source} onChange={e=>setSource(e.target.value as CandidateSource|'')}><option value="">Todas</option><option value="MANUAL">Manual</option><option value="TREND">Trend</option></select></label>
+          <label>Status<select className="ddf-input" value={status} onChange={e=>setStatus(e.target.value as CandidateStatus|'')}><option value="">Todos</option>{Object.entries(labels).map(([value,label])=><option value={value} key={value}>{label}</option>)}</select></label>
+          <label>Região<input className="ddf-input" value={region} onChange={e=>setRegion(e.target.value)} /></label><label>Categoria<input className="ddf-input" value={category} onChange={e=>setCategory(e.target.value)} /></label>
+          <label>Desde<input type="date" className="ddf-input" value={from} onChange={e=>setFrom(e.target.value)} /></label><label>Até<input type="date" className="ddf-input" value={to} onChange={e=>setTo(e.target.value)} /></label>
+        </section>
         <p className="text-sm text-gray-600">{candidates.length} candidato(s) nesta lista</p>
         {candidates.length === 0 && <div className="surface p-8"><h2 className="text-lg font-semibold">{mode === 'triage' ? 'Nenhuma decisão pendente' : 'Nenhum candidato encontrado'}</h2><p className="mt-2">{mode === 'triage' ? 'Envie um candidato da Prateleira Bruta para começar.' : 'Cadastre uma oportunidade ou ajuste a busca.'}</p></div>}
         {candidates.map(c => <article key={c.id} className="surface space-y-3 p-6">
@@ -68,7 +78,9 @@ export function IntakeWorkspace({ mode }: { mode: 'intake' | 'triage' | 'audit' 
           <div className="flex flex-wrap gap-3">
             {c.status === 'CANDIDATO' && <button className="ddf-button" onClick={() => setDecision({ id: c.id, status: 'TRIADO' })}>Enviar para triagem</button>}
             {c.status === 'TRIADO' && <><button className="ddf-button" onClick={() => setDecision({ id: c.id, status: 'APROVADO' })}>Avaliar aprovação</button><button className="ddf-button secondary" onClick={() => setDecision({ id: c.id, status: 'REJEITADO' })}>Rejeitar</button></>}
-            {['CANDIDATO', 'TRIADO'].includes(c.status) && <button className="ddf-button secondary" onClick={() => setDecision({ id: c.id, status: 'ARQUIVADO' })}>Arquivar</button>}
+            {c.status === 'TRIADO' && <button className="ddf-button secondary" onClick={() => setDecision({ id: c.id, status: 'INFORMACAO_SOLICITADA' })}>Solicitar informações</button>}
+            {c.status === 'INFORMACAO_SOLICITADA' && <button className="ddf-button" onClick={() => setDecision({ id: c.id, status: 'TRIADO' })}>Informações recebidas</button>}
+            {['CANDIDATO', 'TRIADO', 'INFORMACAO_SOLICITADA'].includes(c.status) && <button className="ddf-button secondary" onClick={() => setDecision({ id: c.id, status: 'ARQUIVADO' })}>Arquivar</button>}
           </div>
           {decision?.id === c.id && <form className="space-y-3 border-t border-stone-300 pt-4" onSubmit={e => {
             e.preventDefault(); const data = new FormData(e.currentTarget);
@@ -77,7 +89,7 @@ export function IntakeWorkspace({ mode }: { mode: 'intake' | 'triage' | 'audit' 
         </article>)}
       </> : <section className="space-y-3">
         {state.events.length === 0 && <p className="surface p-8">As entradas e decisões aparecerão aqui.</p>}
-        {state.events.map(event => <article key={event.id} className="surface space-y-2 p-5"><h2 className="font-semibold">{event.name}</h2><p>{event.before ? labels[event.before] : 'Nova entrada'} → {labels[event.after]}</p><p className="whitespace-pre-wrap">{event.reason || 'Sem observação'}</p><p className="text-xs text-gray-600">{event.actor} · {new Date(event.at).toLocaleString('pt-BR')}</p></article>)}
+        {state.events.map(event => <article key={event.id} className="surface space-y-2 p-5"><h2 className="font-semibold">{event.name}</h2><p>{event.before ? labels[event.before] : 'Nova entrada'} → {labels[event.after]}</p><p className="whitespace-pre-wrap">{event.reason || 'Sem observação'}</p>{event.snapshot&&<details className="text-sm"><summary>Snapshot imutável da decisão</summary><pre className="mt-2 overflow-auto rounded bg-stone-100 p-3 text-xs">{JSON.stringify(event.snapshot,null,2)}</pre></details>}<p className="text-xs text-gray-600">{event.actor} · {new Date(event.at).toLocaleString('pt-BR')}</p></article>)}
       </section>}
     </>}
   </div>;

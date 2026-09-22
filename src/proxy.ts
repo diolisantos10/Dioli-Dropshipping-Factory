@@ -12,6 +12,7 @@ function withSecurityHeaders(response: NextResponse, correlationId: string) {
   response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
   response.headers.set('Cross-Origin-Opener-Policy', 'same-origin');
   response.headers.set('Content-Security-Policy', "default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+  response.headers.set('Cache-Control', 'private, no-store');
   return response;
 }
 
@@ -43,11 +44,15 @@ export function proxy(request: NextRequest) {
   if (header?.startsWith('Basic ')) {
     try {
       const [user, ...passwordParts] = Buffer.from(header.slice(6), 'base64').toString('utf8').split(':');
-      if (safeEqual(user, expectedUser) && safeEqual(passwordParts.join(':'), expectedPassword)) {
+      const password=passwordParts.join(':');
+      let account={username:expectedUser,password:expectedPassword,role:process.env.DDF_ADMIN_ROLE||'ADMIN'};
+      const configured=process.env.DDF_ADMIN_ACCOUNTS;
+      if(configured){const accounts=JSON.parse(configured) as Array<{username:string;password:string;role:string}>;const match=accounts.find(item=>safeEqual(user,item.username)&&safeEqual(password,item.password));if(match&&['ADMIN','APPROVER','OPERATOR','VIEWER'].includes(match.role))account=match}
+      if (safeEqual(user, account.username) && safeEqual(password, account.password)) {
         attempts.delete(client);
         const requestHeaders = new Headers(request.headers);
         requestHeaders.set('x-ddf-actor', user);
-        requestHeaders.set('x-ddf-role', process.env.DDF_ADMIN_ROLE || 'ADMIN');
+        requestHeaders.set('x-ddf-role', account.role);
         requestHeaders.set('x-correlation-id', correlationId);
         return withSecurityHeaders(NextResponse.next({ request: { headers: requestHeaders } }), correlationId);
       }

@@ -7,7 +7,7 @@ const globalForDb = globalThis as unknown as { ddfPool?: Pool; ddfReady?: Promis
 const pool = globalForDb.ddfPool ?? new Pool({ connectionString: process.env.DATABASE_URL, max: 5, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined });
 if (process.env.NODE_ENV !== 'production') globalForDb.ddfPool = pool;
 
-export const stateNamespaces = ['intake', 'products', 'media', 'pricing', 'connectors', 'orders'] as const;
+export const stateNamespaces = ['intake', 'products', 'media', 'pricing', 'connectors', 'orders', 'catalog'] as const;
 export type StateNamespace = typeof stateNamespaces[number];
 export function isStateNamespace(value: string): value is StateNamespace { return stateNamespaces.includes(value as StateNamespace); }
 
@@ -82,6 +82,25 @@ export async function listAuditEvents(limit = 100) {
   return result.rows;
 }
 
+export async function reprocessOutboxEvent(id:string, actor:string, correlationId:string) {
+  await ready();
+  const client=await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result=await client.query(`UPDATE outbox_events SET status='PENDING',attempts=0,available_at=now(),last_error=NULL,published_at=NULL
+      WHERE id=$1 AND status IN ('FAILED','DEAD') RETURNING id,topic,aggregate_type,aggregate_id`,[id]);
+    if(!result.rows[0]) { await client.query('ROLLBACK'); return null; }
+    const event=result.rows[0];
+    await client.query(`INSERT INTO audit_events(id,actor,action,entity_type,entity_id,correlation_id,metadata)
+      VALUES($1,$2,'OUTBOX_REPROCESS_REQUESTED','OUTBOX_EVENT',$3,$4,$5)`,[
+      randomUUID(),actor,id,correlationId,JSON.stringify({topic:event.topic,aggregateType:event.aggregate_type,aggregateId:event.aggregate_id}),
+    ]);
+    await client.query('COMMIT');
+    return {id:event.id,status:'PENDING' as const};
+  } catch(error) { await client.query('ROLLBACK'); throw error; }
+  finally { client.release(); }
+}
+
 export async function drainOutbox(limit = 20) {
   await ready();
   const client = await pool.connect();
@@ -113,10 +132,14 @@ export async function drainOutbox(limit = 20) {
 
 export async function operationalStatus() {
   await ready();
-  const [outbox, audit, state] = await Promise.all([
+  const started=Date.now();
+  const [outbox, queue, audit, state] = await Promise.all([
     pool.query(`SELECT status,count(*)::int AS count FROM outbox_events GROUP BY status`),
+    pool.query(`SELECT id,topic,aggregate_type AS "aggregateType",aggregate_id AS "aggregateId",status,attempts,
+      available_at AS "availableAt",created_at AS "createdAt",published_at AS "publishedAt",last_error AS "lastError",
+      payload->>'correlationId' AS "correlationId" FROM outbox_events ORDER BY created_at DESC LIMIT 100`),
     pool.query(`SELECT count(*)::int AS count,max(occurred_at) AS latest FROM audit_events`),
-    pool.query(`SELECT namespace,revision,updated_at AS "updatedAt" FROM ddf_state ORDER BY namespace`),
+    pool.query(`SELECT namespace,revision,updated_at AS "updatedAt",updated_at < now() - interval '24 hours' AS stale FROM ddf_state ORDER BY namespace`),
   ]);
-  return { outbox: Object.fromEntries(outbox.rows.map(row=>[row.status,row.count])), audit: audit.rows[0], state: state.rows };
+  return {generatedAt:new Date().toISOString(),latencyMs:Date.now()-started,outbox:Object.fromEntries(outbox.rows.map(row=>[row.status,row.count])),queue:queue.rows,audit:audit.rows[0],state:state.rows.map(row=>({...row,revision:Number(row.revision)}))};
 }

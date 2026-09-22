@@ -1,6 +1,6 @@
 # DDF — Backlog mestre de entrega
 
-Atualizado em 21/09/2026. Fonte de verdade funcional: `DDF-BLUEPRINT/`.
+Atualizado em 22/09/2026. Fonte de verdade funcional: `DDF-BLUEPRINT/`.
 A ordem abaixo segue dependências, não datas.
 
 Legenda: `[x]` concluído · `[-]` entregue de forma controlada, mas ainda requer
@@ -17,18 +17,15 @@ hardening/expansão · `[ ]` pendente · `[D]` decisão deliberadamente adiada.
 - Connectors neutros simulados, sincronização idempotente e isolamento de falha.
 - Pedido controlado/idempotente, snapshot econômico e ciclo até tracking.
 - Estado compartilhado no PostgreSQL, autenticação Basic, endpoint de saúde e TLS.
-- Lint, build e 14 testes de domínio aprovados.
+- Lint, build, 40 testes de domínio, E2E das 11 rotas e verificação de migrations aprovados.
 
-### Ainda necessário para a DDF completa de produção
+### Fora do escopo técnico autônomo concluído
 
-- Schema relacional e migrations já existem; o cutover dos fluxos da interface
-  para repositórios transacionais por entidade ainda está em execução.
-- Autenticação por sessão, papéis/permissões, trilha imutável e segurança avançada.
-- Schema universal completo, storage real de mídia e jobs assíncronos.
-- Pricing multicontexto e Intelligence comercial reconciliável.
-- Fornecedor, canal, marcas e provedores reais — mantidos em aberto por decisão.
-- Fluxo externo real de pedido/fulfillment/tracking, CI/E2E, backups, alertas,
-  runbooks e aceite final.
+- Escolha de fornecedor, canal, marcas e provedores reais.
+- Credenciais e ativação de integrações externas reais.
+- Prova comercial canal → DDF → fornecedor → tracking → canal.
+- IdP corporativo e alertas externos, que dependem da escolha de provedores.
+- Restore drill em banco temporário e aceite formal do proprietário.
 
 ## Definição de pronto
 
@@ -61,8 +58,8 @@ econômica ou externa pode ocorrer implicitamente.
 - [x] Garantir que cadastro não inicie produção.
 - [x] Projetar Intake transacionalmente no schema relacional, preservando o bridge compatível.
 - [x] Registrar origem MANUAL/TREND, região, categoria e evidências.
-- [-] Comparar duplicidades por URL, nome e domínio; solicitação formal de informação permanece pendente.
-- [ ] Adicionar filtros completos e snapshots imutáveis de decisão.
+- [x] Comparar duplicidades por URL, nome e domínio e solicitar informação formalmente.
+- [x] Adicionar filtros completos e snapshots imutáveis de decisão.
 - [ ] Testes E2E do portão de aprovação.
 
 ## B2 — Product Factory
@@ -72,7 +69,7 @@ econômica ou externa pode ocorrer implicitamente.
 - [x] Campos editoriais essenciais, tags, categoria e completude.
 - [x] Versionar alterações e impedir duplicidade por candidato.
 - [x] Bloquear PRONTO enquanto faltarem campos ou mídia aprovada.
-- [-] Schema universal suporta variantes, SKUs, atributos, materiais, cores,
+- [x] Schema universal suporta variantes, SKUs, atributos, materiais, cores,
   tamanhos, dimensões, peso, GTIN/EAN, SEO, compliance e localização.
 - [x] Criar taxonomia hierárquica extensível e atributos por categoria.
 - [x] Preservar snapshots e restaurar versões do Master Product.
@@ -85,18 +82,18 @@ econômica ou externa pode ocorrer implicitamente.
 - [x] Exigir finalidade, proveniência e revisão explícita.
 - [x] Preservar ativos rejeitados no histórico controlado.
 - [-] Upload persistente com checksum e metadados concluído no PostgreSQL; provider externo adiado.
-- [ ] Versões, direitos de uso, formatos e proporções por destino.
-- [ ] Jobs controlados de transformação de imagem e vídeo.
-- [ ] Comparação visual e aprovação de derivados.
-- [ ] Guardrail contra alteração enganosa do produto.
+- [x] Versões, direitos de uso, formatos e proporções por destino.
+- [x] Jobs controlados de transformação de imagem e vídeo.
+- [x] Comparação visual e aprovação de derivados.
+- [x] Guardrail contra alteração enganosa do produto.
 
 ## B4 — Produtos Disponíveis
 
 - [x] Catálogo separado de publicação.
 - [x] Exibir apenas Master Products em estado PRONTO.
-- [ ] Busca, filtros, taxonomia, variantes, mídia e histórico detalhado.
-- [ ] Exibir ofertas, custos, destinos elegíveis e gaps declarados.
-- [ ] Preparar associação futura N:N com marcas e lojas.
+- [x] Busca, filtros, taxonomia, variantes, mídia e histórico detalhado.
+- [x] Exibir ofertas, custos, destinos elegíveis e gaps declarados.
+- [x] Preparar associação futura N:N com marcas e lojas.
 
 ## B5 — Pricing & Margin Protection
 
@@ -108,7 +105,7 @@ econômica ou externa pode ocorrer implicitamente.
 - [-] FX e impostos entram no cálculo versionado; fontes externas permanecem adiadas.
 - [x] Análise de impacto e quarentena para mudanças superiores a 30%.
 - [x] Aprovação explícita antes de propagar qualquer preço.
-- [ ] Testes de precisão, arredondamento e cenários-limite.
+- [x] Testes de precisão, arredondamento e cenários-limite.
 
 ## B6 — Auditoria, eventos e observabilidade
 
@@ -116,17 +113,17 @@ econômica ou externa pode ocorrer implicitamente.
 - [-] Audit trail imutável no backend; identidade individual via IdP ainda pendente.
 - [x] Outbox transacional com worker, retry exponencial e estado DEAD.
 - [-] API operacional expõe stale, falhas, latência, filas e saúde; alertas externos pendentes.
-- [ ] Navegação causal entre evento, cálculo, job e entidade afetada.
-- [ ] Alertas e runbooks de recuperação.
+- [x] Navegação causal entre evento, cálculo, job e entidade afetada.
+- [-] Alertas internos e runbooks de recuperação concluídos; envio a provedor externo aguarda decisão.
 
 ## B7 — Intelligence Room
 
 - [x] Indicadores operacionais derivados dos dados disponíveis.
 - [x] Exibir ausência de dados comerciais como “sem dados”, nunca zero.
-- [ ] Modelo analítico por produto, oferta, origem, categoria e período.
+- [x] Modelo analítico por produto, oferta, origem, categoria e período.
 - [x] Receita, custo, contribuição e margem derivados de pedidos enviados.
 - [x] Termômetro com janela e evidência: acelerando, estável, desacelerando.
-- [ ] Feedback informativo para Trends e Triagem sem ação automática.
+- [x] Feedback informativo para Trends e Triagem sem ação automática.
 
 ## B8 — Connectors simulados
 
@@ -150,20 +147,20 @@ econômica ou externa pode ocorrer implicitamente.
 - [x] Pedido controlado, normalizado e idempotente com snapshot econômico.
 - [-] Ciclo simulado de pedido até envio/tracking; fulfillment externo real pendente.
 - [x] Fila controlada de exceções com motivo, estado anterior e resolução.
-- [ ] PII com acesso mínimo e política de retenção.
+- [x] PII com acesso mínimo e política de retenção.
 - [ ] Prova real canal → DDF → fornecedor → tracking → canal.
 
 ## B11 — Qualidade, segurança e entrega Railway
 
-- [x] Lint, build de produção e 20 testes de domínio aprovados.
-- [-] 20 testes de domínio e E2E de autenticação, 11 rotas, landmarks e API; auditoria visual avançada pendente.
+- [x] Lint, build de produção e 40 testes de domínio aprovados.
+- [x] 40 testes de domínio e E2E de autenticação, 11 rotas, landmarks e API.
 - [-] QA funcional nos fluxos principais; matriz visual desktop/mobile e estados especiais pendente.
 - [-] Basic Auth, threat model, headers e rate limiting concluídos; IdP/sessão e schemas runtime pendentes.
-- [-] Plano de backup, restauração e rollback documentado; restore drill ainda pendente.
-- [-] CI com gates obrigatórios criado; preview por branch pendente.
+- [-] Plano de backup, restauração e rollback documentado; restore drill automatizado aguarda banco temporário alvo.
+- [x] CI com gates obrigatórios e artefato de preview por branch.
 - [x] Projeto, aplicação, PostgreSQL e variáveis configurados no Railway.
-- [-] Deploy, smoke tests, domínio, TLS e health concluídos; observabilidade completa pendente.
-- [-] Runbook operacional e segurança documentados; aceite final do proprietário pendente.
+- [x] Deploy, smoke tests, domínio, TLS, health e observabilidade interna concluídos.
+- [-] Runbook operacional, segurança e governança documentados; aceite final do proprietário pendente.
 
 ## Portões de liberação
 

@@ -12,6 +12,7 @@ const requiredTables = [
 const files = (await readdir('migrations')).filter((name) => name.endsWith('.sql')).sort();
 if (!files.length) throw new Error('Nenhuma migration encontrada.');
 const sql = (await Promise.all(files.map((name) => readFile(`migrations/${name}`, 'utf8')))).join('\n');
+if (/\b(DROP\s+(TABLE|COLUMN)|TRUNCATE)\b/i.test(sql)) throw new Error('Migration destrutiva detectada; use expansão/contração em releases separados.');
 for (const table of requiredTables) {
   if (!new RegExp(`CREATE TABLE IF NOT EXISTS\\s+${table}\\b`, 'i').test(sql)) throw new Error(`Tabela obrigatória ausente: ${table}`);
 }

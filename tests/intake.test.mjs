@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addCandidate, emptyIntake, transitionCandidate } from '../src/lib/intake.ts';
+import { addCandidate, emptyIntake, filterCandidates, transitionCandidate } from '../src/lib/intake.ts';
 const at = '2026-09-20T12:00:00Z';
 const created = () => addCandidate(emptyIntake, { name: 'Produto', url: 'https://example.com/item', notes: 'Avaliar' }, 'c1', at);
 test('cadastro não aprova nem inicia produção', () => {
@@ -24,3 +24,5 @@ test('URL inválida, credenciais e duplicatas são rejeitadas', () => {
   assert.throws(() => addCandidate(created(), {name: 'Outro', url: 'https://example.com/item#fragment', notes: ''}, 'c2', at));
 });
 test('origem, região, categoria e evidências são preservadas',()=>{const state=addCandidate(emptyIntake,{name:'Trend Brasil',url:'https://example.com/trend',notes:'Sinal validado',source:'TREND',region:'BR',category:'Casa',evidence:['Busca crescente','Fonte pública']},'trend-1','2026-01-01T00:00:00Z');const candidate=state.candidates[0];assert.equal(candidate.source,'TREND');assert.equal(candidate.region,'BR');assert.equal(candidate.category,'Casa');assert.deepEqual(candidate.evidence,['Busca crescente','Fonte pública'])});
+test('solicitação de informação retorna à triagem e preserva snapshots',()=>{let state=transitionCandidate(created(),'c1','TRIADO','Avaliar','e1',at);state=transitionCandidate(state,'c1','INFORMACAO_SOLICITADA','Enviar certificação','e2',at);assert.equal(state.events[0].snapshot.status,'INFORMACAO_SOLICITADA');state=transitionCandidate(state,'c1','TRIADO','Certificação recebida','e3',at);assert.equal(state.candidates[0].status,'TRIADO');assert.equal(state.events[1].snapshot.status,'INFORMACAO_SOLICITADA')});
+test('filtros combinam origem, região, categoria, status e período',()=>{let state=addCandidate(emptyIntake,{name:'Trend Brasil',url:'https://example.com/trend',notes:'Sinal',source:'TREND',region:'BR',category:'Casa'},'a','2026-01-10T12:00:00Z');state=addCandidate(state,{name:'Manual UK',url:'https://example.org/item',notes:'Outro',source:'MANUAL',region:'UK',category:'Moda'},'b','2026-02-10T12:00:00Z');const result=filterCandidates(state.candidates,{query:'trend',source:'TREND',region:'br',category:'casa',status:'CANDIDATO',from:'2026-01-01',to:'2026-01-31'});assert.deepEqual(result.map(item=>item.id),['a'])});

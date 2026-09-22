@@ -1,2 +1,2 @@
-import { ProductFactoryWorkspace } from '@/components/product-factory-workspace';
-export default function AvailableProductsPage() { return <ProductFactoryWorkspace mode="catalog" />; }
+import { CatalogWorkspace } from '@/components/catalog-workspace';
+export default function AvailableProductsPage() { return <CatalogWorkspace />; }

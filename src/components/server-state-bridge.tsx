@@ -4,6 +4,7 @@ const stores = [
   ['intake','ddf.intake.demo.v1','ddf-intake-change'],['products','ddf.products.demo.v1','ddf-products-change'],
   ['media','ddf.media.demo.v1','ddf-media-change'],['pricing','ddf.pricing.demo.v1','ddf-pricing-change'],
   ['connectors','ddf.connectors.demo.v1','ddf-connectors-change'],['orders','ddf.orders.demo.v1','ddf-orders-change'],
+  ['catalog','ddf.catalog.demo.v1','ddf-catalog-change'],
 ] as const;
 export function ServerStateBridge(){const[state,setState]=useState<'loading'|'online'|'offline'|'conflict'>('loading');useEffect(()=>{const revisions=new Map<string,number|null>();let active=true;
   Promise.all(stores.map(async([namespace,key,event])=>{const response=await fetch(`/api/state/${namespace}`,{cache:'no-store'});if(!response.ok)throw new Error();const data=await response.json();revisions.set(namespace,data.revision);if(data.payload){localStorage.setItem(key,JSON.stringify(data.payload));window.dispatchEvent(new Event(event));}else{const local=localStorage.getItem(key);if(local){const saved=await fetch(`/api/state/${namespace}`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({payload:JSON.parse(local),revision:null})});if(saved.ok)revisions.set(namespace,(await saved.json()).revision);}}})).then(()=>active&&setState('online')).catch(()=>active&&setState('offline'));

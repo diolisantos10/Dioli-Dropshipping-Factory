@@ -1,2 +1,2 @@
-import { IntelligenceWorkspace } from '@/components/operations-workspaces';
+import { IntelligenceWorkspace } from '@/components/intelligence-workspace';
 export default function Page(){return <IntelligenceWorkspace/>}

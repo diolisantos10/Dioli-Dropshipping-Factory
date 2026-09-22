@@ -29,6 +29,12 @@
 4. Testar restauração em banco isolado com `pg_restore --clean --if-exists`.
 5. Executar `SELECT version FROM schema_migrations ORDER BY version` e smoke tests antes de promover o banco restaurado.
 
+Automação: configure `DATABASE_URL` (origem) e `DDF_RESTORE_DATABASE_URL` (banco isolado e descartável) e execute `npm run db:restore-drill`. O script recusa origem e destino idênticos, restaura o dump e valida migrations. Nunca aponte o destino para produção.
+
+## Smoke de produção
+
+Execute `DDF_SMOKE_URL=https://... DDF_SMOKE_USER=... DDF_SMOKE_PASSWORD=... npm run test:smoke`. O teste exige health saudável, acesso à aplicação e correlation ID. Segredos não devem ser gravados em arquivos ou logs.
+
 ## Incidentes
 
 - **Conflito 409:** recarregar dados; não sobrescrever silenciosamente outra revisão.
