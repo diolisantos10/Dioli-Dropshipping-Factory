@@ -32,6 +32,7 @@ async function ready() {
   })();
   return globalForDb.ddfReady;
 }
+export async function getDatabasePool() { await ready(); return pool; }
 export async function readState(namespace: StateNamespace) {
   await ready(); const result = await pool.query('SELECT payload, revision, updated_at FROM ddf_state WHERE namespace = $1', [namespace]);
   return result.rows[0] ?? null;
