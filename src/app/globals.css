@@ -87,6 +87,28 @@ a {
   border-right: 1px solid #25282e;
 }
 
+.nav-link {
+  color: #a9adb5;
+}
+
+.nav-link:hover {
+  background: #21242a;
+  color: white;
+}
+
+.nav-link.is-active {
+  background: var(--accent);
+  color: white !important;
+  box-shadow: 0 8px 20px rgba(255, 91, 46, 0.2);
+}
+
+.nav-link.is-active svg,
+.nav-link.is-active .nav-label {
+  color: white !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
 .main-column {
   min-width: 0;
 }
