@@ -1,0 +1,5 @@
+import test from'node:test';import assert from'node:assert/strict';import{supplierCandidateInput,validateSupplierSearch}from'../src/lib/supplier-product.ts';
+const product={itemId:'1005001234567890',title:'Óculos polarizado',price:12.5,currency:'USD',imageUrl:'https://ae01.alicdn.com/image.jpg',detailUrl:'https://www.aliexpress.com/item/1005001234567890.html',stock:8};
+test('valida limites da consulta ao fornecedor',()=>{assert.equal(validateSupplierSearch(' oculos ',20),'oculos');assert.throws(()=>validateSupplierSearch('x',20),/2 e 120/);assert.throws(()=>validateSupplierSearch('oculos',51),/1 a 50/)});
+test('mapeia produto para entrada auditável sem credenciais',()=>{const input=supplierCandidateInput(product,'AliExpress principal');assert.equal(input.url,product.detailUrl);assert.match(input.notes,/1005001234567890/);assert.equal(JSON.stringify(input).includes('accessToken'),false)});
+test('bloqueia URL que não pertence ao AliExpress',()=>{assert.throws(()=>supplierCandidateInput({...product,detailUrl:'https://evil.example/item/1'},'Fornecedor'),/não pertence/)});
