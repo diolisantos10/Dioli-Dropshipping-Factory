@@ -1,16 +1,54 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { ServerStateBridge } from "@/components/server-state-bridge";
 import { Bell, Menu, Search, ShieldCheck, X } from "lucide-react";
-import { useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { flatNavigation, navigationGroups } from "@/lib/factory-navigation";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [navigationOpen, setNavigationOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const searchInput = useRef<HTMLInputElement>(null);
   const current = flatNavigation.find((item) => item.href === pathname);
+  const searchResults = useMemo(() => {
+    const term = query.trim().toLocaleLowerCase("pt-BR");
+    if (!term) return flatNavigation.slice(0, 6);
+    return flatNavigation.filter((item) =>
+      [item.label, item.shortLabel, item.description, ...item.keywords]
+        .join(" ")
+        .toLocaleLowerCase("pt-BR")
+        .includes(term),
+    );
+  }, [query]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSearchOpen(true);
+        requestAnimationFrame(() => searchInput.current?.focus());
+      }
+      if (event.key === "Escape") setSearchOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  function navigateTo(href: string) {
+    router.push(href);
+    setSearchOpen(false);
+    setQuery("");
+  }
+
+  function submitSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (searchResults[0]) navigateTo(searchResults[0].href);
+  }
 
   return (
     <div className="app-shell">
@@ -56,14 +94,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                           aria-label={item.label}
                           aria-current={active ? 'page' : undefined}
                           onClick={() => setNavigationOpen(false)}
-                          className={`group relative flex min-h-11 items-center gap-3 rounded-lg px-3 text-[13px] transition-colors ${
-                            active
-                              ? "bg-white text-[#17191d]"
-                              : "text-[#a9adb5] hover:bg-[#21242a] hover:text-white"
-                          }`}
+                          className={`nav-link group relative flex min-h-11 items-center gap-3 rounded-lg px-3 text-[13px] transition-colors ${active ? "is-active" : ""}`}
                         >
                           <Icon size={18} strokeWidth={active ? 2.2 : 1.7} aria-hidden="true" />
-                          <span className="desktop-only flex-1">{item.label}</span>
+                          <span className="nav-label desktop-only flex-1">{item.label}</span>
                           {item.phase === "depois" && (
                             <span className="desktop-only h-1.5 w-1.5 rounded-full bg-[#626771]" aria-label="Fase posterior" />
                           )}
@@ -115,17 +149,48 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="hidden h-10 min-w-64 items-center gap-3 rounded-md border border-[#ddd9d1] bg-white px-3 text-left text-xs text-[#777b83] transition-colors hover:border-[#b9b5ad] lg:flex"
-              aria-label="Buscar na fábrica"
-              disabled
-              title="Busca global em construção; use a busca na Prateleira Bruta"
+            <form
+              className="relative hidden lg:block"
+              onSubmit={submitSearch}
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) setSearchOpen(false);
+              }}
+              role="search"
             >
-              <Search size={16} />
-              <span className="flex-1">Buscar produtos, jobs ou eventos</span>
-              <kbd className="border border-[#e2ded7] bg-[#f6f3ee] px-1.5 py-0.5 font-mono text-[9px]">⌘K</kbd>
-            </button>
+              <div className="flex h-10 min-w-80 items-center gap-3 rounded-md border border-[#ddd9d1] bg-white px-3 text-xs text-[#777b83] transition-colors focus-within:border-[#ff5b2e]">
+                <Search size={16} aria-hidden="true" />
+                <input
+                  ref={searchInput}
+                  value={query}
+                  onChange={(event) => { setQuery(event.target.value); setSearchOpen(true); }}
+                  onFocus={() => setSearchOpen(true)}
+                  className="min-w-0 flex-1 bg-transparent text-[#17191d] outline-none placeholder:text-[#777b83]"
+                  placeholder="Buscar áreas, produtos ou eventos"
+                  aria-label="Buscar na fábrica"
+                  autoComplete="off"
+                />
+                <kbd className="border border-[#e2ded7] bg-[#f6f3ee] px-1.5 py-0.5 font-mono text-[9px]">⌘K</kbd>
+              </div>
+              {searchOpen && (
+                <div className="absolute right-0 top-12 z-50 w-[420px] overflow-hidden rounded-lg border border-[#ddd9d1] bg-white shadow-xl" role="listbox" aria-label="Resultados da busca">
+                  <div className="border-b border-[#ece8e1] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-[#777b83]">
+                    {query ? `${searchResults.length} resultado(s)` : "Acesso rápido"}
+                  </div>
+                  <div className="max-h-96 overflow-y-auto p-1.5">
+                    {searchResults.map((item) => {
+                      const Icon = item.icon;
+                      return (
+                        <button key={item.href} type="button" onClick={() => navigateTo(item.href)} className="flex w-full items-start gap-3 rounded-md px-3 py-2.5 text-left hover:bg-[#f4f1eb]" role="option" aria-selected={pathname === item.href}>
+                          <Icon size={17} className="mt-0.5 shrink-0 text-[#ff5b2e]" aria-hidden="true" />
+                          <span><strong className="block text-xs text-[#17191d]">{item.label}</strong><span className="mt-0.5 block text-[11px] leading-4 text-[#696d75]">{item.description}</span></span>
+                        </button>
+                      );
+                    })}
+                    {searchResults.length === 0 && <p className="px-3 py-5 text-center text-xs text-[#696d75]">Nenhuma área encontrada.</p>}
+                  </div>
+                </div>
+              )}
+            </form>
             <button
               type="button"
               className="relative grid h-10 w-10 place-items-center rounded-md border border-[#ddd9d1] bg-white text-[#4d5159] transition-colors hover:border-[#b9b5ad] hover:text-[#17191d]"
