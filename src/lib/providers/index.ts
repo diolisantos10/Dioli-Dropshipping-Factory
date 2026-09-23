@@ -1,6 +1,8 @@
 import { createAliExpressAdapter } from './aliexpress';
 import type { ProviderAdapter } from './types';
 
+export { isRegisteredProvider, providerKeys } from './registry';
+
 export function getProviderAdapter(
     providerKey: string,
     config: Record<string, string>,
