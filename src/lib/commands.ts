@@ -5,7 +5,7 @@
 import { addCandidate, emptyIntake, transitionCandidate, type CandidateSource, type CandidateStatus, type IntakeState } from './intake.ts';
 import { emptyProductFactory, markProductReady, restoreProductVersion, startProduct, updateProduct, type ProductFactoryState, type UniversalProductSpec } from './product-factory.ts';
 import { addMedia, completeTransformation, emptyMedia, enqueueTransformation, hasApprovedMedia, reviewMedia, updateTransformationJob, type MediaAsset, type MediaState, type TransformationJob } from './media-factory.ts';
-import { approvePrice, calculatePrice, emptyPricing, releaseQuarantine, type PricingInput, type PricingState } from './pricing.ts';
+import { approvePrice, calculatePrice, emptyPricing, recalculateSupplierCost, releaseQuarantine, type PricingInput, type PricingState } from './pricing.ts';
 import { advanceOrder, emptyOrders, flagOrderException, purgeExpiredOrderData, receiveOrder, resolveOrderException, type ExceptionCategory, type ExceptionResolution, type OrderState, type OrderStatus } from './orders.ts';
 import { addSupplierOffer, assignProduct, emptyCatalog, refreshSupplierOffer, upsertParty, type CatalogState } from './catalog.ts';
 
@@ -155,6 +155,7 @@ export const COMMANDS: Record<string, Handler> = {
   } },
   // The approver identity is the authenticated actor, not a free-text field from the browser.
   'pricing.approve': { writes: 'pricing', reads: [], roles: always(APPROVE), run: (s, i, c) => approvePrice(s.pricing, str(i, 'calculationId', 80), c.actor, c.at) },
+  'pricing.recalculateSupplierCost': { writes: 'pricing', reads: [], roles: always(['ADMIN', 'SYSTEM']), run: (s, i, c) => recalculateSupplierCost(s.pricing, str(i, 'calculationId', 80), num(i, 'supplierCost'), c.newId(), c.at) },
   'pricing.releaseQuarantine': { writes: 'pricing', reads: [], roles: always(APPROVE), run: (s, i, c) => releaseQuarantine(s.pricing, str(i, 'calculationId', 80), c.actor, str(i, 'reason', 1000)) },
   'orders.receive': { writes: 'orders', reads: ['products'], roles: always([...OPERATE, 'SYSTEM']), run: (s, i, c) => {
     const productId = str(i, 'productId', 80);

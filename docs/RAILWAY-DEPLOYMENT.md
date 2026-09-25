@@ -33,8 +33,9 @@ remains untouched.
   1. `credentials` — refreshes AliExpress tokens (`/auth/token/refresh`) and Shopify client-credentials tokens that expire within 24 h;
   2. `outbox` — drains the transactional outbox;
   3. `supplierOffers` — refreshes cost, stock and lead time of AliExpress offers in the catalog (`aliexpress.ds.product.get`); prices are **not** re-propagated;
-  4. `channelOrders` — imports paid Shopify orders for products published through the DDF (idempotent);
-  5. `retention` — applies the order data retention policy.
+  4. `priceRecalculation` — when an offer cost changed, creates a new version of the latest price calculation of each linked context (offerId = offer ID/supplier ref, or the product's only offer). The new version goes through Margin Guard (block / >30% quarantine) and stays PENDING approval; the approved and published price is untouched;
+  5. `channelOrders` — imports paid Shopify orders for products published through the DDF (idempotent);
+  6. `retention` — applies the order data retention policy.
 - Runs are stored in `automation_runs` and audited as `AUTOMATION_RUN`. The panel in **Integrações → Automação** shows the history and lets an ADMIN run it on demand.
 
 ## Provider consoles

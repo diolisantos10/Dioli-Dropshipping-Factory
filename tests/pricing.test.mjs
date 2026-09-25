@@ -6,3 +6,21 @@ test('contexto, FX, aprovação e quarentena são controlados',()=>{let state=ca
 test('arredondamento monetário é previsível e registra fontes',()=>{assert.equal(roundMoney(1.005),1.01);const c=calculatePrice(emptyPricing,{...base,supplierCost:10.005},'m','now').calculations[0];assert.equal(c.totalFixedCost,35.01);assert.equal(c.sources.fx.version,'manual-v1')});
 test('limites inseguros são bloqueados',()=>{assert.throws(()=>calculatePrice(emptyPricing,{...base,channelFeePercent:101},'x','now'),/100%/);const c=calculatePrice(emptyPricing,{...base,channelFeePercent:60,paymentFeePercent:20,targetMarginPercent:20},'x','now').calculations[0];assert.equal(c.status,'BLOQUEADO')});
 test('quarentena exige justificativa e volta pendente para aprovação',()=>{let state=calculatePrice(emptyPricing,{...base,country:'BR'},'a','now');state=calculatePrice(state,{...base,country:'BR',supplierCost:200},'b','later');assert.throws(()=>releaseQuarantine(state,'b','D','curta'),/justificativa/);state=releaseQuarantine(state,'b','Dioli','Impacto econômico revisado');assert.equal(state.calculations[0].status,'CALCULADO');assert.equal(state.calculations[0].approval,'PENDENTE')});
+
+test('recálculo automático gera nova versão pendente e respeita a quarentena do Margin Guard', async () => {
+  const { calculatePrice, approvePrice, recalculateSupplierCost, emptyPricing } = await import('../src/lib/pricing.ts');
+  const base = { productId: 'p1', supplierCost: 30, shipping: 10, taxes: 5, fixedFees: 1, channelFeePercent: 10, paymentFeePercent: 5, operatingCost: 2, reserve: 2, targetMarginPercent: 30, minimumMarginPercent: 15, currency: 'BRL', channel: 'shopify' };
+  let state = calculatePrice(emptyPricing, base, 'c1', '2026-09-25T00:00:00Z');
+  state = approvePrice(state, 'c1', 'carla', '2026-09-25T00:01:00Z');
+  const small = recalculateSupplierCost(state, 'c1', 32, 'c2', '2026-09-25T01:00:00Z');
+  assert.equal(small.calculations[0].id, 'c2');
+  assert.equal(small.calculations[0].version, 2);
+  assert.equal(small.calculations[0].status, 'CALCULADO');
+  assert.equal(small.calculations[0].approval, 'PENDENTE');
+  assert.match(small.calculations[0].reason, /30 → 32/);
+  assert.equal(small.calculations[1].approval, 'APROVADO', 'preço aprovado anterior não é alterado');
+  const big = recalculateSupplierCost(state, 'c1', 60, 'c3', '2026-09-25T01:00:00Z');
+  assert.equal(big.calculations[0].status, 'QUARENTENA');
+  assert.equal(recalculateSupplierCost(state, 'c1', 30, 'c4', 'x'), state, 'custo igual não gera versão');
+  assert.throws(() => recalculateSupplierCost(small, 'c1', 40, 'c5', 'x'), /mais recente/);
+});

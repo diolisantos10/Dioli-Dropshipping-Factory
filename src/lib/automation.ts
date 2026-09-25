@@ -4,10 +4,10 @@ import { getChannelAdapterForIntegration, getSupplierAdapterForIntegration, refr
 import { drainOutbox, getDatabasePool, readState } from './server-state';
 import { emptyCatalog, type CatalogState } from './catalog';
 import { emptyOrders, purgeExpiredOrderData, type OrderState } from './orders';
-import { emptyPricing, type PricingState } from './pricing';
+import { emptyPricing, latestCalculations, type PricingState } from './pricing';
 
-export type AutomationTask = 'outbox' | 'credentials' | 'supplierOffers' | 'channelOrders' | 'retention';
-export const automationTasks: AutomationTask[] = ['credentials', 'outbox', 'supplierOffers', 'channelOrders', 'retention'];
+export type AutomationTask = 'outbox' | 'credentials' | 'supplierOffers' | 'priceRecalculation' | 'channelOrders' | 'retention';
+export const automationTasks: AutomationTask[] = ['credentials', 'outbox', 'supplierOffers', 'priceRecalculation', 'channelOrders', 'retention'];
 type TaskResult = { task: AutomationTask; status: 'SUCCEEDED' | 'FAILED'; durationMs: number; detail: Record<string, unknown>; error?: string };
 const SYSTEM = { role: 'SYSTEM' as const };
 const MAX_OFFERS_PER_RUN = 25;
@@ -83,6 +83,36 @@ async function importChannelOrders(actor: string, correlationId: string) {
   return { channels: channels.length, imported, ignored, failures };
 }
 
+// Links the latest price calculation of each context to the supplier offer it was built on (offerId equal
+// to the offer ID or supplier reference, or the product's only offer) and recalculates when the offer cost
+// changed. Currency consistency is required: same currency with FX 1, or a different currency with FX set.
+export function pendingRecalculations(catalog: CatalogState, pricing: PricingState) {
+  const work: { calculationId: string; supplierCost: number; offerId: string }[] = [];
+  const skipped: string[] = [];
+  for (const calc of latestCalculations(pricing)) {
+    const offers = catalog.offers.filter((offer) => offer.productId === calc.productId);
+    const offer = offers.find((item) => calc.offerId === item.id || calc.offerId === item.supplierRef) ?? (offers.length === 1 ? offers[0] : undefined);
+    if (!offer || offer.cost === calc.supplierCost) continue;
+    const fx = calc.fxRate ?? 1;
+    const sameCurrency = offer.currency.toUpperCase() === calc.currency.toUpperCase();
+    if (sameCurrency !== (fx === 1)) { skipped.push(`${calc.id}: moeda da oferta ${offer.currency} incompatível com FX ${fx}`); continue; }
+    work.push({ calculationId: calc.id, supplierCost: offer.cost, offerId: offer.id });
+  }
+  return { work, skipped };
+}
+
+async function recalculatePrices(actor: string, correlationId: string) {
+  const [catalogRow, pricingRow] = await Promise.all([readState('catalog'), readState('pricing')]);
+  const { work, skipped } = pendingRecalculations((catalogRow?.payload ?? emptyCatalog) as CatalogState, (pricingRow?.payload ?? emptyPricing) as PricingState);
+  let recalculated = 0; const failures: string[] = [];
+  for (const item of work) {
+    try { await runServerCommand('pricing.recalculateSupplierCost', { calculationId: item.calculationId, supplierCost: item.supplierCost }, { ...SYSTEM, actor, correlationId }); recalculated += 1; }
+    catch (error) { failures.push(`${item.calculationId}: ${error instanceof Error ? error.message : 'falha'}`); }
+  }
+  if (failures.length && failures.length === work.length) throw new Error(failures.slice(0, 3).join('; '));
+  return { candidates: work.length, recalculated, skipped, failures };
+}
+
 async function applyRetention(actor: string, correlationId: string) {
   const orders = ((await readState('orders'))?.payload ?? emptyOrders) as OrderState;
   const next = purgeExpiredOrderData(orders, new Date().toISOString());
@@ -95,6 +125,7 @@ const handlers: Record<AutomationTask, (actor: string, correlationId: string) =>
   credentials: (actor) => refreshExpiringCredentials(actor),
   outbox: async () => drainOutbox(100),
   supplierOffers: syncSupplierOffers,
+  priceRecalculation: recalculatePrices,
   channelOrders: importChannelOrders,
   retention: applyRetention,
 };
