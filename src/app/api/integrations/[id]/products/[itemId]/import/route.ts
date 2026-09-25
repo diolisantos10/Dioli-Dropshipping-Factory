@@ -1,3 +1,25 @@
-import{randomUUID}from'node:crypto';import{getSupplierAdapterForIntegration}from'@/lib/integrations';import{emptyIntake,type IntakeState}from'@/lib/intake';import{readState,writeState}from'@/lib/server-state';import{importSupplierProduct}from'@/lib/supplier-import';export const runtime='nodejs';
-function allowed(request:Request){return(request.headers.get('x-ddf-role')||(process.env.NODE_ENV==='production'?'':'ADMIN'))==='ADMIN'}
-export async function POST(request:Request,{params}:{params:Promise<{id:string;itemId:string}>}){if(!allowed(request))return Response.json({error:'Permissão insuficiente.'},{status:403});try{const{id,itemId}=await params;if(!/^\d{5,30}$/.test(itemId))return Response.json({error:'Referência de produto inválida.'},{status:400});const connection=await getSupplierAdapterForIntegration(id);if(!connection)return Response.json({error:'Fornecedor não encontrado.'},{status:404});const product=await connection.adapter.getProduct(itemId);for(let attempt=0;attempt<2;attempt++){const row=await readState('intake');const state=(row?.payload??emptyIntake)as IntakeState;const candidateId=randomUUID();const next=importSupplierProduct(state,product,connection.name,candidateId,new Date().toISOString());const saved=await writeState('intake',next,row?Number(row.revision):null,'admin:supplier-import',randomUUID());if(saved)return Response.json({candidate:next.candidates.find(item=>item.id===candidateId),revision:Number(saved.revision)},{status:201})}return Response.json({error:'Os dados mudaram durante a importação. Tente novamente.'},{status:409})}catch(error){return Response.json({error:error instanceof Error?error.message:'Não foi possível importar o produto.'},{status:400})}}
+import { runServerCommand } from '@/lib/command-runner';
+import { CommandError } from '@/lib/commands';
+import { getSupplierAdapterForIntegration } from '@/lib/integrations';
+import { forbidden, hasRole, requestActor, requestCorrelationId, requestRole } from '@/lib/request-context';
+import { supplierCandidateInput } from '@/lib/supplier-product';
+import type { IntakeState } from '@/lib/intake';
+export const runtime = 'nodejs';
+
+export async function POST(request: Request, { params }: { params: Promise<{ id: string; itemId: string }> }) {
+  if (!hasRole(request, ['ADMIN', 'APPROVER', 'OPERATOR'])) return forbidden();
+  try {
+    const { id, itemId } = await params;
+    if (!/^\d{5,30}$/.test(itemId)) return Response.json({ error: 'Referência de produto inválida.' }, { status: 400 });
+    const connection = await getSupplierAdapterForIntegration(id);
+    if (!connection) return Response.json({ error: 'Fornecedor não encontrado.' }, { status: 404 });
+    const product = await connection.adapter.getProduct(itemId);
+    const input = supplierCandidateInput(product, connection.name);
+    const result = await runServerCommand('intake.addCandidate', { ...input }, { actor: requestActor(request, 'admin:supplier-import'), role: requestRole(request), correlationId: requestCorrelationId(request) });
+    const candidate = (result.payload as IntakeState).candidates.find((item) => item.url === input.url);
+    return Response.json({ candidate, revision: result.revision }, { status: 201 });
+  } catch (error) {
+    const status = error instanceof CommandError ? error.status : 400;
+    return Response.json({ error: error instanceof Error ? error.message : 'Não foi possível importar o produto.' }, { status });
+  }
+}

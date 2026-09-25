@@ -37,7 +37,7 @@ export async function readState(namespace: StateNamespace) {
   await ready(); const result = await pool.query('SELECT payload, revision, updated_at FROM ddf_state WHERE namespace = $1', [namespace]);
   return result.rows[0] ?? null;
 }
-export async function writeState(namespace: StateNamespace, payload: unknown, expectedRevision: number | null, actor: string, correlationId: string) {
+export async function writeState(namespace: StateNamespace, payload: unknown, expectedRevision: number | null, actor: string, correlationId: string, details: Record<string, unknown> = {}) {
   await ready();
   const client = await pool.connect();
   try {
@@ -53,11 +53,11 @@ export async function writeState(namespace: StateNamespace, payload: unknown, ex
     await client.query(`INSERT INTO audit_events(id,actor,action,entity_type,entity_id,correlation_id,before_state,after_state,metadata)
       VALUES($1,$2,'STATE_UPDATED','STATE_NAMESPACE',$3,$4,$5,$6,$7)`, [
       randomUUID(), actor, namespace, correlationId, before.rows[0]?.payload ?? null, payload,
-      JSON.stringify({ previousRevision: before.rows[0] ? Number(before.rows[0].revision) : null, revision: Number(result.rows[0].revision) }),
+      JSON.stringify({ ...details, previousRevision: before.rows[0] ? Number(before.rows[0].revision) : null, revision: Number(result.rows[0].revision) }),
     ]);
     await client.query(`INSERT INTO outbox_events(id,topic,aggregate_type,aggregate_id,payload,idempotency_key)
       VALUES($1,'ddf.state.updated','STATE_NAMESPACE',$2,$3,$4)`, [
-      randomUUID(), namespace, JSON.stringify({ namespace, revision: Number(result.rows[0].revision), correlationId }), `${namespace}:${result.rows[0].revision}`,
+      randomUUID(), namespace, JSON.stringify({ ...details, namespace, revision: Number(result.rows[0].revision), correlationId }), `${namespace}:${result.rows[0].revision}`,
     ]);
     await client.query('COMMIT');
     await drainOutbox(20).catch(() => undefined);

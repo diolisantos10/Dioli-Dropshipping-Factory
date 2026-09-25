@@ -28,6 +28,19 @@ function safeEqual(left: string, right: string) {
 export function proxy(request: NextRequest) {
   const correlationId = request.headers.get('x-correlation-id')?.match(/^[0-9a-f-]{36}$/i)?.[0] ?? crypto.randomUUID();
   if (request.nextUrl.pathname === '/health') return withSecurityHeaders(NextResponse.next(), correlationId);
+  // Machine access for the Railway cron service: a single route, a dedicated bearer secret, role SYSTEM.
+  const cronToken = process.env.DDF_CRON_TOKEN;
+  const bearer = request.headers.get('authorization')?.match(/^Bearer (.+)$/)?.[1];
+  if (request.nextUrl.pathname === '/api/jobs/run' && bearer) {
+    if (cronToken && cronToken.length >= 32 && safeEqual(bearer, cronToken)) {
+      const requestHeaders = new Headers(request.headers);
+      requestHeaders.set('x-ddf-actor', 'system:cron');
+      requestHeaders.set('x-ddf-role', 'SYSTEM');
+      requestHeaders.set('x-correlation-id', correlationId);
+      return withSecurityHeaders(NextResponse.next({ request: { headers: requestHeaders } }), correlationId);
+    }
+    return withSecurityHeaders(new NextResponse('Token de automação inválido.', { status: 401 }), correlationId);
+  }
   const expectedUser = process.env.DDF_ADMIN_USER;
   const expectedPassword = process.env.DDF_ADMIN_PASSWORD;
   if (!expectedUser || !expectedPassword) {

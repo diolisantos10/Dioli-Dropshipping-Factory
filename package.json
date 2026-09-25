@@ -16,7 +16,8 @@
     "test:smoke": "node scripts/production-smoke.mjs",
     "db:restore-drill": "node scripts/restore-drill.mjs",
     "check": "npm run lint && npm run test && npm run build",
-    "db:verify": "node scripts/verify-migrations.mjs"
+    "db:verify": "node scripts/verify-migrations.mjs",
+    "cron": "node scripts/cron.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.47.0",

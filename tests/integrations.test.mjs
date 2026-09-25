@@ -58,7 +58,8 @@ test('status inicial reflete presença de credencial utilizável', () => {
 });
 
 test('registro de provedores reconhece somente adapters disponíveis', () => {
-  assert.deepEqual(providerKeys, ['aliexpress']);
+  assert.deepEqual(providerKeys, ['aliexpress', 'shopify']);
+  assert.equal(isRegisteredProvider('shopify'), true);
   assert.equal(isRegisteredProvider('aliexpress'), true);
   assert.equal(isRegisteredProvider('unknown-provider'), false);
 });

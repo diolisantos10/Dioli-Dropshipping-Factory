@@ -2,7 +2,8 @@
 
 import { useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
-import { addCandidate, emptyIntake, filterCandidates, INTAKE_STORAGE_KEY, transitionCandidate, type CandidateSource, type CandidateStatus, type IntakeState } from '@/lib/intake';
+import { emptyIntake, filterCandidates, INTAKE_STORAGE_KEY, type CandidateSource, type CandidateStatus, type IntakeState } from '@/lib/intake';
+import { command, errorMessage, sendCommand } from '@/lib/command-client';
 
 const key = INTAKE_STORAGE_KEY;
 function subscribe(callback: () => void) {
@@ -35,12 +36,6 @@ export function IntakeWorkspace({ mode }: { mode: 'intake' | 'triage' | 'audit' 
   const [region, setRegion] = useState(''); const [category, setCategory] = useState('');
   const [status, setStatus] = useState<CandidateStatus | ''>(''); const [from, setFrom] = useState(''); const [to, setTo] = useState('');
   const [decision, setDecision] = useState<{ id: string; status: CandidateStatus } | null>(null);
-  function persist(next: IntakeState) {
-    if (snapshot() !== raw) throw new Error('Os dados mudaram em outra aba. Revise a lista antes de repetir a ação.');
-    localStorage.setItem(key, JSON.stringify(next));
-    window.dispatchEvent(new Event('ddf-intake-change'));
-    setError('');
-  }
   const candidates = filterCandidates(state.candidates, { query, source, region, category, status: mode === 'triage' ? (status || undefined) : status, from, to })
     .filter(c => mode !== 'triage' || ['TRIADO', 'INFORMACAO_SOLICITADA'].includes(c.status));
   return <div className="space-y-6">
@@ -52,7 +47,7 @@ export function IntakeWorkspace({ mode }: { mode: 'intake' | 'triage' | 'audit' 
       {mode === 'overview' && <><section className="grid gap-4 sm:grid-cols-3">{(['CANDIDATO', 'TRIADO', 'APROVADO'] as CandidateStatus[]).map(status => <article key={status} className="surface p-6"><h2>{labels[status]}</h2><p className="mt-4 text-4xl font-semibold">{state.candidates.filter(c => c.status === status).length}</p></article>)}</section><div className="flex flex-wrap gap-3"><Link className="ddf-button" href="/prateleira-bruta">Cadastrar oportunidade</Link><Link className="ddf-button secondary" href="/triagem">Revisar pendências</Link><Link className="ddf-button secondary" href="/auditoria">Ver histórico</Link></div><p>Produção, margem e integrações ainda não estão ativas. As contagens acima refletem os registros deste navegador.</p></>}
       {mode === 'intake' && <form className="surface grid gap-4 p-6" onSubmit={event => {
         event.preventDefault(); const form = event.currentTarget; const data = new FormData(form);
-        try { persist(addCandidate(state, { name: String(data.get('name')), url: String(data.get('url')), notes: String(data.get('notes')),source:String(data.get('source')) as 'MANUAL'|'TREND',region:String(data.get('region')),category:String(data.get('category')),evidence:String(data.get('evidence')).split('\n') }, crypto.randomUUID(), new Date().toISOString())); form.reset(); setMessage('Candidato cadastrado. Nenhuma produção iniciada.'); } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível salvar.'); }
+        sendCommand(command('intake.addCandidate', { name: String(data.get('name')), url: String(data.get('url')), notes: String(data.get('notes')),source:String(data.get('source')),region:String(data.get('region')),category:String(data.get('category')),evidence:String(data.get('evidence')).split('\n') })).then(() => { form.reset(); setError(''); setMessage('Candidato cadastrado. Nenhuma produção iniciada.'); }, e => setError(errorMessage(e, 'Não foi possível salvar.')));
       }}>
         <h2 className="text-xl font-semibold">Adicionar oportunidade</h2>
         <label>Nome do candidato<input name="name" required maxLength={160} className="ddf-input" /></label>
@@ -84,7 +79,7 @@ export function IntakeWorkspace({ mode }: { mode: 'intake' | 'triage' | 'audit' 
           </div>
           {decision?.id === c.id && <form className="space-y-3 border-t border-stone-300 pt-4" onSubmit={e => {
             e.preventDefault(); const data = new FormData(e.currentTarget);
-            try { persist(transitionCandidate(state, c.id, decision.status, String(data.get('reason')), crypto.randomUUID(), new Date().toISOString())); setDecision(null); setMessage('Decisão registrada no histórico local.'); } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível salvar.'); }
+            sendCommand(command('intake.transition', { candidateId: c.id, status: decision.status, reason: String(data.get('reason')) })).then(() => { setDecision(null); setError(''); setMessage('Decisão registrada e auditada no servidor.'); }, e => setError(errorMessage(e, 'Não foi possível salvar.')));
           }}><p>Confirmar: <strong>{labels[decision.status]}</strong>. A decisão preservará o histórico do candidato.</p><label>Justificativa<textarea autoFocus name="reason" required maxLength={2000} rows={3} className="ddf-input" /></label><div className="flex gap-3"><button className="ddf-button" type="submit">Confirmar decisão</button><button className="ddf-button secondary" type="button" onClick={() => setDecision(null)}>Cancelar</button></div></form>}
         </article>)}
       </> : <section className="space-y-3">

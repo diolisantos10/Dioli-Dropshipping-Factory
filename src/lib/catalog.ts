@@ -56,3 +56,9 @@ export function filterCatalog(records: CatalogRecord[], filters: CatalogFilters)
     return (!query || searchable.includes(query)) && (!filters.category || record.product.category === filters.category) && (!filters.brandId || record.assignment.brandIds.includes(filters.brandId)) && (!filters.storeId || record.assignment.storeIds.includes(filters.storeId)) && (!filters.destination || record.assignment.destinations.includes(filters.destination)) && (!filters.gapsOnly || hasGaps);
   });
 }
+export function refreshSupplierOffer(state: CatalogState, offerId: string, input: { cost: number; currency: string; stock: number | null; leadTimeDays: number | null }, at: string): CatalogState {
+  const offer = state.offers.find(item => item.id === offerId);
+  if (!offer) throw new Error('Oferta de fornecedor não encontrada.');
+  if (!Number.isFinite(input.cost) || input.cost < 0 || !input.currency.trim() || (input.stock !== null && (!Number.isInteger(input.stock) || input.stock < 0)) || (input.leadTimeDays !== null && (!Number.isInteger(input.leadTimeDays) || input.leadTimeDays < 0))) throw new Error('Snapshot de fornecedor inválido.');
+  return { ...state, offers: state.offers.map(item => item.id === offerId ? { ...item, cost: input.cost, currency: input.currency.trim().toUpperCase(), stock: input.stock, leadTimeDays: input.leadTimeDays, updatedAt: at } : item) };
+}

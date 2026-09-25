@@ -6,7 +6,7 @@ const requiredTables = [
   'supplier_connections', 'supplier_offers', 'inventory_snapshots', 'brands', 'stores',
   'channels', 'channel_connections', 'listings', 'pricing_rules', 'price_calculations',
   'orders', 'order_items', 'supplier_orders', 'fulfillments', 'shipments', 'tracking_events',
-  'sync_jobs', 'intelligence_metrics',
+  'sync_jobs', 'intelligence_metrics', 'integration_configs', 'oauth_states', 'channel_listings', 'automation_runs',
 ];
 
 const files = (await readdir('migrations')).filter((name) => name.endsWith('.sql')).sort();
