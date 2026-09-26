@@ -46,6 +46,6 @@ export async function publishProductToChannel(integrationId: string, productId: 
     RETURNING id,external_id AS "externalId",admin_url AS "adminUrl",status,price::float AS price,currency`,
   [randomUUID(), integrationId, productId, price.id, result.externalId, result.handle, result.adminUrl, result.status, price.suggestedPrice, price.currency, actor])).rows[0];
   await db.query(`INSERT INTO audit_events(id,actor,action,entity_type,entity_id,correlation_id,before_state,after_state,metadata) VALUES($1,$2,$3,'CHANNEL_LISTING',$4,$5,$6,$7,$8)`,
-    [randomUUID(), actor, existing ? 'CHANNEL_LISTING_UPDATED' : 'CHANNEL_LISTING_PUBLISHED', listing.id, correlationId, existing ? JSON.stringify(existing) : null, JSON.stringify(listing), JSON.stringify({ integrationId, productId, priceCalculationId: price.id, productVersion: product.version })]);
-  return listing;
+    [randomUUID(), actor, existing ? 'CHANNEL_LISTING_UPDATED' : 'CHANNEL_LISTING_PUBLISHED', listing.id, correlationId, existing ? JSON.stringify(existing) : null, JSON.stringify(listing), JSON.stringify({ integrationId, productId, priceCalculationId: price.id, productVersion: product.version, salesChannels: result.salesChannels ?? [], warnings: result.warnings ?? [] })]);
+  return { ...listing, salesChannels: result.salesChannels ?? [], warnings: result.warnings ?? [] };
 }
