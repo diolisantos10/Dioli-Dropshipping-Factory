@@ -88,3 +88,45 @@ test('entrada inválida e comando desconhecido são recusados', () => {
   assert.throws(() => executeCommand('intake.addCandidate', emptyStates, { name: 5, url: 'https://a.b' }, ctx()), /Campo inválido: name/);
   assert.throws(() => executeCommand('intake.transition', emptyStates, { candidateId: 'x', status: 'HACK', reason: 'r' }, ctx()), /Valor inválido: status/);
 });
+
+test('comando em massa da vitrine: operador arquiva, só aprovador aprova ou rejeita', () => {
+  assert.throws(() => authorizeCommand('intake.bulkTransition', { status: 'APROVADO' }, 'OPERATOR'), /papel/);
+  assert.throws(() => authorizeCommand('intake.bulkTransition', { status: 'REJEITADO' }, 'OPERATOR'), /papel/);
+  assert.doesNotThrow(() => authorizeCommand('intake.bulkTransition', { status: 'ARQUIVADO' }, 'OPERATOR'));
+  assert.throws(() => authorizeCommand('catalog.bulkCurate', {}, 'OPERATOR'), /papel/);
+  let s = structuredClone(emptyStates);
+  s = run(s, 'intake.addCandidate', { name: 'A', url: 'https://example.com/a', notes: '' });
+  s = run(s, 'intake.addCandidate', { name: 'B', url: 'https://example.com/b', notes: '' });
+  const ids = s.intake.candidates.map((c) => c.id);
+  s = run(s, 'intake.bulkTransition', { candidateIds: ids, status: 'APROVADO', reason: 'Lote aprovado' }, ctx('APPROVER', 'bruno'));
+  assert.deepEqual(s.intake.candidates.map((c) => c.status), ['APROVADO', 'APROVADO']);
+  assert.ok(s.intake.events.filter((e) => e.after === 'APROVADO').every((e) => e.actor === 'bruno'));
+  assert.throws(() => run(s, 'intake.bulkTransition', { candidateIds: [], status: 'ARQUIVADO', reason: 'x' }), /Selecione/);
+  assert.throws(() => run(s, 'intake.bulkTransition', { candidateIds: ids, status: 'CANDIDATO', reason: 'x' }), /Valor inválido/);
+});
+
+test('importação via comando aceita nome completo e dados do fornecedor, e limpa URLs inseguras', () => {
+  const long = 'x'.repeat(300);
+  let s = structuredClone(emptyStates);
+  s = run(s, 'intake.addCandidate', { name: `${'x'.repeat(159)}…`, fullName: long, url: 'https://www.aliexpress.com/item/1.html', notes: '', supplier: { name: 'AliExpress', ref: '1', cost: 10, currency: 'usd', stock: 3, imageUrl: 'javascript:alert(1)', images: ['https://ae01.alicdn.com/a.jpg', 'http://inseguro/b.jpg'], variants: [{ sku: 's', label: 'Azul', price: 10, stock: -1 }] } });
+  const candidate = s.intake.candidates[0];
+  assert.equal(candidate.fullName, long);
+  assert.equal(candidate.supplier.currency, 'USD');
+  assert.deepEqual(candidate.supplier.images, ['https://ae01.alicdn.com/a.jpg']);
+  assert.equal(candidate.supplier.imageUrl, 'https://ae01.alicdn.com/a.jpg');
+  assert.equal(candidate.supplier.variants[0].stock, null);
+  assert.throws(() => run(s, 'intake.addCandidate', { name: 'y'.repeat(161), url: 'https://example.com/y', notes: '' }), /160 caracteres/);
+  const emoji = `${'😀'.repeat(159)}…`;
+  s = run(s, 'intake.addCandidate', { name: emoji, url: 'https://example.com/emoji', notes: '' });
+  assert.equal(s.intake.candidates[0].name, emoji);
+});
+
+test('curadoria em massa de Disponíveis só aceita produtos PRONTOS', () => {
+  const { s, productId } = readyWorld();
+  assert.throws(() => run(s, 'catalog.bulkCurate', { productIds: [productId], status: 'ARQUIVADO', reason: 'x' }), /PRONTOS/);
+  let ready = run(s, 'media.addAsset', { asset: { productId, url: 'https://img.test/a.jpg', kind: 'ORIGINAL', purpose: 'p', provenance: 'x' } });
+  ready = run(ready, 'media.review', { assetId: ready.media.assets[0].id, status: 'APROVADA' });
+  ready = run(ready, 'products.markReady', { productId });
+  ready = run(ready, 'catalog.bulkCurate', { productIds: [productId], status: 'ARQUIVADO', reason: 'Fora da coleção' }, ctx('APPROVER', 'bruno'));
+  assert.deepEqual(ready.catalog.curation.map((item) => [item.productId, item.status, item.actor]), [[productId, 'ARQUIVADO', 'bruno']]);
+});

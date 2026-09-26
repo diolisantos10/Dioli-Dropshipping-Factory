@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   aliExpressAuthorizeUrl, callAliExpressBusiness, callAliExpressSystem, createAliExpressAdapter, normalizeAliExpressToken,
-  parseDsProduct, parseDsSearchProducts, signAliExpressRequest, tokenNeedsRefresh,
+  isAliExpressSuccessCode, parseDsProduct, parseDsSearchProducts, signAliExpressRequest, tokenNeedsRefresh,
 } from '../src/lib/providers/aliexpress.ts';
 
 const creds = { appKey: 'key', appSecret: 'secret', accessToken: 'token' };
@@ -151,4 +151,33 @@ test('teste sem token orienta a conectar a conta', async () => {
   const result = await createAliExpressAdapter({ appKey: 'key' }, { appSecret: 'secret' }, 'PRODUCTION').test();
   assert.equal(result.ok, false);
   assert.match(result.message, /Conecte a conta AliExpress/);
+});
+
+test('código "00" do AliExpress é sucesso (topo, code e rsp_code); outros códigos seguem como erro', async (t) => {
+  assert.equal(isAliExpressSuccessCode('00'), true);
+  assert.equal(isAliExpressSuccessCode('0'), true);
+  assert.equal(isAliExpressSuccessCode('200'), true);
+  assert.equal(isAliExpressSuccessCode('001'), false);
+  assert.equal(isAliExpressSuccessCode('405'), false);
+  t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({ code: '00', aliexpress_ds_product_get_response: { rsp_code: '00', result: { ok: true } } }), { status: 200 }));
+  const body = await callAliExpressBusiness('aliexpress.ds.product.get', creds);
+  assert.deepEqual(body.result, { ok: true });
+  t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({ aliexpress_ds_text_search_response: { code: '00', data: {} } }), { status: 200 }));
+  await assert.doesNotReject(callAliExpressBusiness('aliexpress.ds.text.search', creds));
+  t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({ code: '00' }), { status: 200 }));
+  await assert.doesNotReject(callAliExpressSystem('/auth/token/create', creds, { code: 'abc123' }));
+});
+
+test('ds.product.get devolve todas as fotos e as variantes (SKU) para a vitrine', () => {
+  const product = parseDsProduct({ result: {
+    ae_item_base_info_dto: { product_id: 55, subject: 'Mochila' },
+    ae_multimedia_info_dto: { image_urls: '//ae01.alicdn.com/1.jpg;https://ae01.alicdn.com/2.jpg;https://ae01.alicdn.com/2.jpg' },
+    ae_item_sku_info_dtos: { ae_item_sku_info_d_t_o: [
+      { sku_id: 'A1', sku_available_stock: 5, sku_price: '30', currency_code: 'BRL', ae_sku_property_dtos: { ae_sku_property_d_t_o: [{ sku_property_name: 'Cor', property_value_definition_name: 'Azul', sku_image: 'https://ae01.alicdn.com/azul.jpg' }] } },
+      { sku_id: 'A2', sku_available_stock: 0, sku_price: '28', currency_code: 'BRL', ae_sku_property_dtos: [{ sku_property_value: 'Verde' }] },
+    ] },
+  } }, '55', 'BRL');
+  assert.deepEqual(product.images, ['https://ae01.alicdn.com/1.jpg', 'https://ae01.alicdn.com/2.jpg']);
+  assert.deepEqual(product.variants.map((item) => [item.sku, item.label, item.price, item.stock]), [['A1', 'Azul', 30, 5], ['A2', 'Verde', 28, 0]]);
+  assert.equal(product.variants[0].imageUrl, 'https://ae01.alicdn.com/azul.jpg');
 });
