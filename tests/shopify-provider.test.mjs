@@ -27,7 +27,7 @@ test('HMAC do callback OAuth é verificado sobre parâmetros ordenados sem hmac'
 test('URL de autorização pede somente os escopos necessários', () => {
   const url = new URL(shopifyAuthorizeUrl('loja', 'client', 'https://ddf.test/cb', 'state'));
   assert.equal(url.origin + url.pathname, 'https://loja.myshopify.com/admin/oauth/authorize');
-  assert.equal(url.searchParams.get('scope'), 'write_products,read_orders');
+  assert.equal(url.searchParams.get('scope'), 'write_products,read_orders,read_publications,write_publications');
   assert.equal(url.searchParams.get('state'), 'state');
 });
 
@@ -80,4 +80,25 @@ test('pedidos são mapeados com linhas, produto e total', () => {
   assert.equal(order.total, 199.8);
   assert.equal(order.cancelled, false);
   assert.deepEqual(order.lines[0], { externalProductId: 'gid://shopify/Product/1', sku: 'S', quantity: 2, unitPrice: 99.9 });
+});
+
+test('canais de venda: padrão Headless, casa pelo título e publica sem falhar a listagem', async (t) => {
+  const { parseSalesChannels, matchPublications, publishToSalesChannels } = await import('../src/lib/providers/shopify.ts');
+  assert.deepEqual(parseSalesChannels(undefined), ['headless']);
+  assert.deepEqual(parseSalesChannels(' Headless , Online Store ,headless'), ['headless', 'online store']);
+  const pubs = [{ id: 'gid://shopify/Publication/1', title: 'Online Store' }, { id: 'gid://shopify/Publication/2', title: 'Santioh Headless' }];
+  assert.deepEqual(matchPublications(pubs, ['headless']), { matched: [pubs[1]], missing: [] });
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body); calls.push(body);
+    if (body.query.includes('ddfPublications')) return new Response(JSON.stringify({ data: { publications: { nodes: [{ id: 'gid://shopify/Publication/2', catalog: { title: 'Santioh Headless' } }] } } }), { status: 200 });
+    return new Response(JSON.stringify({ data: { publishablePublish: { userErrors: [] } } }), { status: 200 });
+  });
+  const ok = await publishToSalesChannels('loja.myshopify.com', 't', '2026-07', 'gid://shopify/Product/9', ['headless']);
+  assert.deepEqual(ok, { salesChannels: ['Santioh Headless'], warnings: [] });
+  assert.deepEqual(calls[1].variables, { id: 'gid://shopify/Product/9', input: [{ publicationId: 'gid://shopify/Publication/2' }] });
+  t.mock.method(globalThis, 'fetch', async () => new Response('', { status: 403 }));
+  const denied = await publishToSalesChannels('loja.myshopify.com', 't', '2026-07', 'gid://shopify/Product/9', ['headless']);
+  assert.equal(denied.salesChannels.length, 0);
+  assert.match(denied.warnings[0], /reconecte a Shopify/);
 });
