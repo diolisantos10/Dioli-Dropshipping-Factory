@@ -6,7 +6,9 @@ import type { ChannelAdapter, ChannelListingInput, ChannelOrder } from './types'
 // 2. Admin API access token pasted directly (legacy custom apps);
 // 3. Client credentials grant (Dev Dashboard app in the same organization as the store; 24h token).
 export const SHOPIFY_DEFAULT_API_VERSION = '2026-07';
-export const SHOPIFY_SCOPES = 'write_products,read_orders';
+// read/write_publications: publish each product to the configured sales channels (e.g. the Headless storefront of the brand site).
+export const SHOPIFY_SCOPES = 'write_products,read_orders,read_publications,write_publications';
+export const SHOPIFY_DEFAULT_SALES_CHANNELS = 'Headless';
 const REQUEST_TIMEOUT_MS = 20_000;
 
 export type ShopifyToken = { accessToken: string; scope: string; expiresAt: string };
@@ -142,6 +144,64 @@ const PRODUCT_SET = `mutation ddfProductSet($identifier: ProductSetIdentifiers, 
   }
 }`;
 
+const PUBLICATIONS = `query ddfPublications { publications(first: 50) { nodes { id catalog { title } } } }`;
+const PUBLICATIONS_LEGACY = `query ddfPublicationsLegacy { publications(first: 50) { nodes { id name } } }`;
+const PUBLISH = `mutation ddfPublish($id: ID!, $input: [PublicationInput!]!) {
+  publishablePublish(id: $id, input: $input) { userErrors { field message } }
+}`;
+
+export function parseSalesChannels(value?: string): string[] {
+  return [...new Set((value ?? SHOPIFY_DEFAULT_SALES_CHANNELS).split(',').map((item) => item.trim().toLowerCase()).filter(Boolean))];
+}
+
+type Publication = { id: string; title: string };
+function parsePublications(data: Record<string, unknown>): Publication[] {
+  const nodes = record(data.publications).nodes;
+  return (Array.isArray(nodes) ? nodes : []).map(record)
+    .map((node) => ({ id: String(node.id ?? ''), title: String(record(node.catalog).title ?? node.name ?? '') }))
+    .filter((item) => item.id && item.title);
+}
+
+export function matchPublications(publications: Publication[], wanted: string[]): { matched: Publication[]; missing: string[] } {
+  const matched = publications.filter((item) => wanted.some((name) => item.title.toLowerCase().includes(name)));
+  const missing = wanted.filter((name) => !publications.some((item) => item.title.toLowerCase().includes(name)));
+  return { matched, missing };
+}
+
+// Best effort: the product is already saved in Shopify, so a channel problem becomes a warning, never a failed publication.
+export async function publishToSalesChannels(shop: string, token: string, version: string, productId: string, wanted: string[]) {
+  const warnings: string[] = [];
+  if (!wanted.length) return { salesChannels: [] as string[], warnings };
+  let publications: Publication[] = [];
+  try {
+    publications = parsePublications(await shopifyGraphql(shop, token, version, PUBLICATIONS));
+  } catch {
+    try { publications = parsePublications(await shopifyGraphql(shop, token, version, PUBLICATIONS_LEGACY)); } catch (error) {
+      const message = error instanceof Error ? error.message : 'erro desconhecido';
+      warnings.push(/403|access|scope|permiss/i.test(message)
+        ? 'Produto salvo, mas sem publicar nos canais de venda: reconecte a Shopify para autorizar as permissões de publicação.'
+        : `Produto salvo, mas não foi possível listar os canais de venda: ${message}`);
+      return { salesChannels: [] as string[], warnings };
+    }
+  }
+  const { matched, missing } = matchPublications(publications, wanted);
+  for (const name of missing) warnings.push(`Canal de venda "${name}" não encontrado na Shopify.`);
+  if (!matched.length) return { salesChannels: [] as string[], warnings };
+  try {
+    const data = await shopifyGraphql(shop, token, version, PUBLISH, { id: productId, input: matched.map((item) => ({ publicationId: item.id })) });
+    const errors = record(data.publishablePublish).userErrors;
+    const list = Array.isArray(errors) ? errors.map(record) : [];
+    if (list.length) {
+      warnings.push(`Shopify recusou a publicação nos canais: ${list.map((item) => String(item.message)).join('; ')}`);
+      return { salesChannels: [] as string[], warnings };
+    }
+  } catch (error) {
+    warnings.push(`Produto salvo, mas a publicação nos canais falhou: ${error instanceof Error ? error.message : 'erro desconhecido'}`);
+    return { salesChannels: [] as string[], warnings };
+  }
+  return { salesChannels: matched.map((item) => item.title), warnings };
+}
+
 const RECENT_ORDERS = `query ddfOrders($first: Int!, $query: String) {
   orders(first: $first, query: $query, sortKey: CREATED_AT, reverse: true) {
     nodes {
@@ -192,7 +252,11 @@ export function createShopifyAdapter(config: Record<string, string>, secrets: Re
       const product = record(result.product);
       if (!product.id) throw new Error('Shopify não retornou o produto publicado.');
       const numericId = String(product.id).split('/').pop();
-      return { externalId: String(product.id), handle: String(product.handle ?? ''), status: String(product.status ?? 'DRAFT'), adminUrl: `https://${normalizeShopDomain(shop)}/admin/products/${numericId}` };
+      const channels = await publishToSalesChannels(shop, token, version, String(product.id), parseSalesChannels(config.salesChannels));
+      return {
+        externalId: String(product.id), handle: String(product.handle ?? ''), status: String(product.status ?? 'DRAFT'),
+        adminUrl: `https://${normalizeShopDomain(shop)}/admin/products/${numericId}`, salesChannels: channels.salesChannels, warnings: channels.warnings,
+      };
     },
     async listRecentOrders(options = {}) {
       const limit = Math.min(100, Math.max(1, Math.trunc(options.limit ?? 50)));

@@ -31,7 +31,7 @@ export interface ChannelListingInput {
   imageUrls: string[];
 }
 
-export interface ChannelListingResult { externalId: string; handle: string; status: string; adminUrl: string }
+export interface ChannelListingResult { externalId: string; handle: string; status: string; adminUrl: string; salesChannels?: string[]; warnings?: string[] }
 
 export interface ChannelOrder {
   externalOrderId: string;
