@@ -66,11 +66,16 @@ async function post(url: string, params: Record<string, string>): Promise<Record
   return data;
 }
 
+// The gateway reports success as "0", but some DS endpoints answer "00" (or "200" on rsp_code).
+export function isAliExpressSuccessCode(code: string): boolean {
+  return code === '' || /^0+$/.test(code) || code === '200';
+}
+
 function gatewayError(data: Record<string, unknown>): Error | null {
   const error = record(data.error_response);
   const source = Object.keys(error).length ? error : data;
   const code = text(source.sub_code ?? source.code);
-  if (!code || code === '0') return null;
+  if (!code || /^0+$/.test(code)) return null;
   const message = text(source.sub_msg ?? source.msg ?? source.message) || 'Erro desconhecido';
   return new Error(`AliExpress ${code}: ${message}`);
 }
@@ -89,7 +94,7 @@ export async function callAliExpressBusiness(
   if (error) throw error;
   const body = record(data[`${method.replaceAll('.', '_')}_response`] ?? Object.entries(data).find(([key]) => key.endsWith('_response'))?.[1]);
   const code = text(body.rsp_code ?? body.code);
-  if (code && code !== '0' && code !== '200') throw new Error(`AliExpress ${code}: ${text(body.rsp_msg ?? body.msg) || 'falha na operação'}`);
+  if (!isAliExpressSuccessCode(code)) throw new Error(`AliExpress ${code}: ${text(body.rsp_msg ?? body.msg) || 'falha na operação'}`);
   return body;
 }
 
@@ -188,13 +193,25 @@ export function parseDsProduct(body: Record<string, unknown>, itemId: string, fa
   const prices = (available.length ? available : skus).map(priceOf).filter((price) => Number.isFinite(price) && price > 0);
   const quantities = skus.map(stockOf);
   const knownStock = quantities.every((quantity) => typeof quantity === 'number');
-  const images = Array.isArray(multimedia.image_urls) ? multimedia.image_urls.map(text) : text(multimedia.image_urls).split(';');
+  const images = [...new Set((Array.isArray(multimedia.image_urls) ? multimedia.image_urls.map(text) : text(multimedia.image_urls).split(';')).map(httpsUrl).filter(Boolean))].slice(0, 20);
+  const variants = skus.slice(0, 50).map((sku, index) => {
+    const properties = list(sku.ae_sku_property_dtos).map(record);
+    const label = properties.map((item) => text(item.property_value_definition_name ?? item.sku_property_value)).filter(Boolean).join(' / ');
+    const price = priceOf(sku);
+    const stock = stockOf(sku);
+    return {
+      sku: text(sku.sku_id ?? sku.id ?? sku.sku_attr) || `sku-${index + 1}`, label: label || `Variante ${index + 1}`,
+      price: Number.isFinite(price) && price > 0 ? price : null, stock: typeof stock === 'number' ? stock : null,
+      imageUrl: httpsUrl(properties.map((item) => text(item.sku_image)).find(Boolean)),
+    };
+  });
   const deliveryDays = Number(record(result.logistics_info_dto).delivery_time);
   return {
     itemId: text(base.product_id) || itemId, title: text(base.subject),
     price: prices.length ? Math.min(...prices) : 0,
     currency: (text(skus[0]?.currency_code) || text(base.currency_code) || fallbackCurrency).toUpperCase(),
-    imageUrl: httpsUrl(images.find(Boolean)),
+    imageUrl: images[0] ?? '',
+    images, variants,
     detailUrl: `https://www.aliexpress.com/item/${itemId}.html`,
     stock: skus.length && !available.length ? 0 : knownStock && skus.length ? quantities.reduce<number>((sum, quantity) => sum + (quantity ?? 0), 0) : undefined,
     shippingTime: Number.isFinite(deliveryDays) && deliveryDays > 0 ? `${deliveryDays} dias` : undefined,

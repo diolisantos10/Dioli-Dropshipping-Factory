@@ -2,12 +2,12 @@
 // server, against the persisted state: the browser only sends intent (type + input) and never a
 // computed payload. Identity, timestamps and IDs come from the server context, and cross-module
 // rules (approved candidate, approved media, READY product, approver role) are enforced here.
-import { addCandidate, emptyIntake, transitionCandidate, type CandidateSource, type CandidateStatus, type IntakeState } from './intake.ts';
+import { addCandidate, bulkTransitionCandidates, emptyIntake, transitionCandidate, type CandidateSource, type CandidateStatus, type CandidateSupplier, type IntakeState } from './intake.ts';
 import { emptyProductFactory, markProductReady, restoreProductVersion, startProduct, updateProduct, type ProductFactoryState, type UniversalProductSpec } from './product-factory.ts';
 import { addMedia, completeTransformation, emptyMedia, enqueueTransformation, hasApprovedMedia, reviewMedia, updateTransformationJob, type MediaAsset, type MediaState, type TransformationJob } from './media-factory.ts';
 import { approvePrice, calculatePrice, emptyPricing, recalculateSupplierCost, releaseQuarantine, type PricingInput, type PricingState } from './pricing.ts';
 import { advanceOrder, emptyOrders, flagOrderException, purgeExpiredOrderData, receiveOrder, resolveOrderException, type ExceptionCategory, type ExceptionResolution, type OrderState, type OrderStatus } from './orders.ts';
-import { addSupplierOffer, assignProduct, emptyCatalog, refreshSupplierOffer, upsertParty, type CatalogState } from './catalog.ts';
+import { addSupplierOffer, assignProduct, curateProducts, emptyCatalog, refreshSupplierOffer, upsertParty, type CatalogState } from './catalog.ts';
 
 export type CommandNamespace = 'intake' | 'products' | 'media' | 'pricing' | 'orders' | 'catalog';
 export type CommandRole = 'ADMIN' | 'APPROVER' | 'OPERATOR' | 'SYSTEM';
@@ -90,9 +90,33 @@ function mediaAssetInput(raw: Input): Omit<MediaAsset, 'id' | 'status' | 'create
   };
 }
 
+const BULK_STATUSES = ['APROVADO', 'REJEITADO', 'ARQUIVADO'] as const;
+const BULK_MAX = 200;
+function ids(input: Input, key: string): string[] {
+  const value = strings(input, key, BULK_MAX);
+  if (!value.length || value.some((item) => !item || item.length > 80)) throw new CommandError(`Selecione de 1 a ${BULK_MAX} itens.`);
+  return value;
+}
+const finiteOrNull = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+const httpsOrEmpty = (value: unknown) => typeof value === 'string' && /^https:\/\/[^\s]{1,2040}$/.test(value) ? value : '';
+function supplierInput(input: Input): CandidateSupplier | undefined {
+  if (input.supplier === undefined || input.supplier === null) return undefined;
+  const raw = obj(input, 'supplier');
+  const images = Array.isArray(raw.images) ? raw.images.map(httpsOrEmpty).filter(Boolean).slice(0, 20) : [];
+  const variants = (Array.isArray(raw.variants) ? raw.variants : []).slice(0, 50).map((value) => {
+    const item = (value && typeof value === 'object' ? value : {}) as Input;
+    return { sku: String(item.sku ?? '').slice(0, 120), label: String(item.label ?? '').slice(0, 300), price: finiteOrNull(item.price), stock: finiteOrNull(item.stock), imageUrl: httpsOrEmpty(item.imageUrl) };
+  });
+  return {
+    name: str(raw, 'name', 160), ref: str(raw, 'ref', 160), cost: finiteOrNull(raw.cost), currency: (str(raw, 'currency', 3, false) || 'BRL').toUpperCase(),
+    stock: finiteOrNull(raw.stock), imageUrl: httpsOrEmpty(raw.imageUrl) || images[0] || '', images, variants,
+  };
+}
+
 export const COMMANDS: Record<string, Handler> = {
   'intake.addCandidate': { writes: 'intake', reads: [], roles: always(OPERATE), run: (s, i, c) => addCandidate(s.intake, {
-    name: str(i, 'name', 160), url: str(i, 'url', 2048), notes: str(i, 'notes', 2000, false),
+    // 160 characters are enforced by addCandidate on code points; 640 UTF-16 units covers emoji-heavy names.
+    name: str(i, 'name', 640), fullName: str(i, 'fullName', 2000, false) || undefined, supplier: supplierInput(i), url: str(i, 'url', 2048), notes: str(i, 'notes', 2000, false),
     source: (i.source === 'TREND' ? 'TREND' : 'MANUAL') as CandidateSource, region: str(i, 'region', 120, false), category: str(i, 'category', 120, false), evidence: strings(i, 'evidence', 50),
   }, c.newId(), c.at, c.actor) },
   'intake.transition': {
@@ -100,6 +124,12 @@ export const COMMANDS: Record<string, Handler> = {
     // Portfolio gate: approving or rejecting a candidate is an approver decision.
     roles: (i) => ['APROVADO', 'REJEITADO'].includes(String(i.status)) ? APPROVE : OPERATE,
     run: (s, i, c) => transitionCandidate(s.intake, str(i, 'candidateId', 80), oneOf(i, 'status', CANDIDATE_STATUSES) as CandidateStatus, str(i, 'reason', 2000), c.newId(), c.at, c.actor),
+  },
+  // Storefront bulk decision. Ineligible items are skipped; the batch fails only if nothing applies.
+  'intake.bulkTransition': {
+    writes: 'intake', reads: [],
+    roles: (i) => ['APROVADO', 'REJEITADO'].includes(String(i.status)) ? APPROVE : OPERATE,
+    run: (s, i, c) => bulkTransitionCandidates(s.intake, ids(i, 'candidateIds'), oneOf(i, 'status', BULK_STATUSES), str(i, 'reason', 2000), c.newId, c.at, c.actor).state,
   },
   'products.start': { writes: 'products', reads: ['intake'], roles: always(OPERATE), run: (s, i, c) => {
     const candidate = s.intake.candidates.find((item) => item.id === str(i, 'candidateId', 80));
@@ -181,6 +211,11 @@ export const COMMANDS: Record<string, Handler> = {
     const productId = str(i, 'productId', 80);
     readyProduct(s, productId);
     return addSupplierOffer(s.catalog, { productId, supplierRef: str(i, 'supplierRef', 160), supplierName: str(i, 'supplierName', 160), cost: num(i, 'cost'), currency: str(i, 'currency', 3), stock: nullableInt(i, 'stock'), leadTimeDays: nullableInt(i, 'leadTimeDays') }, c.newId(), c.at);
+  } },
+  'catalog.bulkCurate': { writes: 'catalog', reads: ['products'], roles: always(APPROVE), run: (s, i, c) => {
+    const productIds = ids(i, 'productIds');
+    productIds.forEach((productId) => readyProduct(s, productId));
+    return curateProducts(s.catalog, productIds, oneOf(i, 'status', BULK_STATUSES), str(i, 'reason', 2000), c.actor, c.at);
   } },
   'catalog.refreshOffer': { writes: 'catalog', reads: [], roles: always(['ADMIN', 'SYSTEM']), run: (s, i, c) => refreshSupplierOffer(s.catalog, str(i, 'offerId', 80), { cost: num(i, 'cost'), currency: str(i, 'currency', 3), stock: nullableInt(i, 'stock'), leadTimeDays: nullableInt(i, 'leadTimeDays') }, c.at) },
 };

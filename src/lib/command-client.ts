@@ -20,6 +20,8 @@ export async function sendCommand({ type, input }: Command): Promise<void> {
   if (target && body.payload) {
     try { localStorage.setItem(target[0], JSON.stringify(body.payload)); } catch { /* cache is best effort */ }
     window.dispatchEvent(new Event(target[1]));
+    // Server-backed screens take the authoritative payload directly, without going through the cache.
+    window.dispatchEvent(new CustomEvent('ddf-state-update', { detail: { namespace: body.namespace, payload: body.payload } }));
   }
 }
 

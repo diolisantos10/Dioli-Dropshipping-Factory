@@ -8,7 +8,10 @@ export type SupplierOffer = {
   cost: number; currency: string; stock: number | null; leadTimeDays: number | null; updatedAt: string;
 };
 export type ProductAssignment = { productId: string; brandIds: string[]; storeIds: string[]; destinations: string[]; updatedAt: string };
-export type CatalogState = { version: 1; brands: CatalogParty[]; stores: CatalogParty[]; offers: SupplierOffer[]; assignments: ProductAssignment[] };
+export type CurationStatus = 'APROVADO' | 'REJEITADO' | 'ARQUIVADO';
+// Latest storefront decision per product; the full before/after trail lives in audit_events.
+export type CatalogCuration = { productId: string; status: CurationStatus; reason: string; actor: string; at: string };
+export type CatalogState = { version: 1; brands: CatalogParty[]; stores: CatalogParty[]; offers: SupplierOffer[]; assignments: ProductAssignment[]; curation?: CatalogCuration[] };
 export type CatalogFilters = { query?: string; category?: string; brandId?: string; storeId?: string; destination?: string; gapsOnly?: boolean };
 export type CatalogRecord = {
   product: MasterProduct; assignment: ProductAssignment; brands: CatalogParty[]; stores: CatalogParty[];
@@ -55,6 +58,13 @@ export function filterCatalog(records: CatalogRecord[], filters: CatalogFilters)
     const hasGaps = Object.values(record.destinationGaps).some(gaps => gaps.length > 0);
     return (!query || searchable.includes(query)) && (!filters.category || record.product.category === filters.category) && (!filters.brandId || record.assignment.brandIds.includes(filters.brandId)) && (!filters.storeId || record.assignment.storeIds.includes(filters.storeId)) && (!filters.destination || record.assignment.destinations.includes(filters.destination)) && (!filters.gapsOnly || hasGaps);
   });
+}
+export function curateProducts(state: CatalogState, productIds: string[], status: CurationStatus, reason: string, actor: string, at: string): CatalogState {
+  const unique = [...new Set(productIds.map(id => id.trim()).filter(Boolean))];
+  if (!unique.length) throw new Error('Selecione ao menos um produto.');
+  if (!reason.trim() || reason.length > 2000) throw new Error('Registre uma justificativa de até 2.000 caracteres.');
+  const decisions = unique.map(productId => ({ productId, status, reason: reason.trim(), actor, at }));
+  return { ...state, curation: [...decisions, ...(state.curation ?? []).filter(item => !unique.includes(item.productId))] };
 }
 export function refreshSupplierOffer(state: CatalogState, offerId: string, input: { cost: number; currency: string; stock: number | null; leadTimeDays: number | null }, at: string): CatalogState {
   const offer = state.offers.find(item => item.id === offerId);
