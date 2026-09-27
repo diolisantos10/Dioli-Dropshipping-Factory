@@ -7,12 +7,16 @@ export interface SupplierAdapter extends ProviderAdapter {
     getProduct(itemId: string): Promise<SupplierProduct>;
 }
 
+export interface SupplierVariant { sku: string; label: string; price: number | null; stock: number | null; imageUrl: string }
+
 export interface SupplierProduct {
     itemId: string;
     title: string;
     price: number;
     currency: string;
     imageUrl: string;
+    images?: string[];
+    variants?: SupplierVariant[];
     detailUrl: string;
     stock?: number;
     shippingTime?: string;

@@ -1,73 +1,71 @@
 'use client';
 
-import { useState, useSyncExternalStore } from 'react';
-import { catalogRecords, CATALOG_STORAGE_KEY, emptyCatalog, filterCatalog, type CatalogState, type SupplierOffer } from '@/lib/catalog';
+import { useMemo, useState } from 'react';
+import { catalogRecords, type CatalogRecord, type CatalogState, type CurationStatus, type SupplierOffer } from '@/lib/catalog';
 import { command, errorMessage, sendCommand, type Command } from '@/lib/command-client';
-import { emptyMedia, MEDIA_STORAGE_KEY, type MediaState } from '@/lib/media-factory';
-import { emptyProductFactory, PRODUCT_STORAGE_KEY, productGaps, type ProductFactoryState } from '@/lib/product-factory';
-import { emptyPricing, PRICING_STORAGE_KEY, type PricingState } from '@/lib/pricing';
+import { productGaps } from '@/lib/product-factory';
+import { curationLabels, productCard } from '@/lib/storefront';
+import { formatMoney as money, Storefront, type BulkAction, type StateOption } from '@/components/storefront';
+import { useServerStates } from '@/components/use-server-states';
 
-const eventName = 'ddf-catalog-change';
-const keys = [PRODUCT_STORAGE_KEY, MEDIA_STORAGE_KEY, PRICING_STORAGE_KEY, CATALOG_STORAGE_KEY];
-function subscribe(callback: () => void) { const events = ['storage', 'ddf-products-change', 'ddf-media-change', 'ddf-pricing-change', eventName]; events.forEach(name => window.addEventListener(name, callback)); return () => events.forEach(name => window.removeEventListener(name, callback)); }
-function snapshot() { try { return JSON.stringify(keys.map(key => localStorage.getItem(key) ?? '')); } catch { return 'unavailable'; } }
-function parse(raw: string | null) {
-  if (!raw) return { factory: emptyProductFactory, media: emptyMedia, pricing: emptyPricing, catalog: emptyCatalog };
-  const [productsRaw, mediaRaw, pricingRaw, catalogRaw] = JSON.parse(raw) as string[];
-  const factory: ProductFactoryState = productsRaw ? JSON.parse(productsRaw) : emptyProductFactory;
-  const media: MediaState = mediaRaw ? JSON.parse(mediaRaw) : emptyMedia;
-  const pricing: PricingState = pricingRaw ? JSON.parse(pricingRaw) : emptyPricing;
-  const catalog: CatalogState = catalogRaw ? JSON.parse(catalogRaw) : emptyCatalog;
-  if (factory.version !== 1 || media.version !== 1 || pricing.version !== 1 || catalog.version !== 1 || !Array.isArray(catalog.assignments)) throw new Error();
-  return { factory, media, pricing, catalog };
-}
+// Read straight from the server: /disponiveis must never depend on a browser cache being parseable.
+const NAMESPACES = ['products', 'media', 'pricing', 'catalog', 'intake'] as const;
 const list = (value: FormDataEntryValue | null) => String(value ?? '').split(',').map(item => item.trim()).filter(Boolean);
-const money = (value: number, currency: string) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: currency || 'BRL' }).format(value);
+const bulkActions: BulkAction[] = [
+  { status: 'APROVADO', label: 'Aprovar', tone: 'primary' },
+  { status: 'REJEITADO', label: 'Rejeitar', tone: 'danger' },
+  { status: 'ARQUIVADO', label: 'Arquivar' },
+];
+const stateOptions: StateOption[] = [
+  { value: 'ATIVOS', label: 'Ativos (sem arquivados)' }, { value: '', label: 'Todos' },
+  ...(['PRONTO', 'APROVADO', 'REJEITADO', 'ARQUIVADO'] as const).map(value => ({ value, label: curationLabels[value] })),
+];
 
 export function CatalogWorkspace() {
-  const raw = useSyncExternalStore(subscribe, snapshot, () => null);
-  let data = { factory: emptyProductFactory, media: emptyMedia, pricing: emptyPricing, catalog: emptyCatalog }; let loadError = '';
-  try { data = parse(raw); } catch { loadError = 'O catálogo não pôde ser lido. A edição foi bloqueada para proteger os dados.'; }
-  const [filters, setFilters] = useState({ query: '', category: '', brandId: '', storeId: '', destination: '', gapsOnly: false });
-  const [expanded, setExpanded] = useState<string | null>(null); const [message, setMessage] = useState(''); const [error, setError] = useState('');
-  const allRecords = catalogRecords(data.catalog, data.factory.products, data.media.assets, data.pricing.calculations, data.factory.events);
-  const records = filterCatalog(allRecords, filters);
-  const categories = [...new Set(allRecords.map(item => item.product.category).filter(Boolean))].sort();
-  const destinations = [...new Set([...allRecords.flatMap(item => item.assignment.destinations), ...allRecords.flatMap(item => Object.keys(item.destinationGaps))])].sort();
+  const { states, status, fromCache, error: loadError, reload } = useServerStates(NAMESPACES);
+  const [message, setMessage] = useState(''); const [error, setError] = useState('');
+  const records = useMemo(() => catalogRecords(states.catalog, states.products.products, states.media.assets, states.pricing.calculations, states.products.events), [states]);
+  const cards = useMemo(() => {
+    const curation = new Map((states.catalog.curation ?? []).map(item => [item.productId, item.status]));
+    const candidates = new Map(states.intake.candidates.map(item => [item.id, item]));
+    return records.map(record => productCard(record, candidates.get(record.product.candidateId), curation.get(record.product.id)));
+  }, [records, states.catalog.curation, states.intake.candidates]);
   function act(cmd: Command, success: string) { sendCommand(cmd).then(() => { setError(''); setMessage(success); }, cause => setError(errorMessage(cause))); }
+  async function onBulk(ids: string[], target: string, reason: string) {
+    try { await sendCommand(command('catalog.bulkCurate', { productIds: ids, status: target, reason })); }
+    catch (cause) { throw new Error(errorMessage(cause, 'Não foi possível registrar a decisão.')); }
+    return `${ids.length} produto(s) → ${curationLabels[target as CurationStatus]}. Registrado na auditoria; nada foi publicado.`;
+  }
+  const byId = new Map(records.map(record => [record.product.id, record]));
+  const counts = { total: cards.length, approved: cards.filter(card => card.state === 'APROVADO').length, archived: cards.filter(card => card.state === 'ARQUIVADO').length };
   return <div className="space-y-6">
-    <header><p className="eyebrow">Catálogo central / distribuição futura</p><h1 className="display-title">Produtos Disponíveis</h1><p className="lede">Produtos mestres prontos, com qualidade, variantes, mídia, ofertas, custos, destinos, gaps e associações comerciais — sem publicar automaticamente.</p></header>
-    {(error || loadError) && <p role="alert" className="border border-red-300 bg-red-50 p-4 text-red-800">{error || loadError}</p>}<p role="status" className="text-sm text-green-800">{message}</p>
-    <section className="surface grid gap-4 p-5 md:grid-cols-3 xl:grid-cols-6" aria-label="Filtros do catálogo">
-      <label className="md:col-span-2">Buscar produto, tag, SKU ou variante<input className="ddf-input" value={filters.query} onChange={event => setFilters({ ...filters, query: event.target.value })} /></label>
-      <Filter label="Categoria" value={filters.category} options={categories.map(value => [value, value])} onChange={category => setFilters({ ...filters, category })} />
-      <Filter label="Marca" value={filters.brandId} options={data.catalog.brands.map(item => [item.id, item.name])} onChange={brandId => setFilters({ ...filters, brandId })} />
-      <Filter label="Loja" value={filters.storeId} options={data.catalog.stores.map(item => [item.id, item.name])} onChange={storeId => setFilters({ ...filters, storeId })} />
-      <Filter label="Destino" value={filters.destination} options={destinations.map(value => [value, value])} onChange={destination => setFilters({ ...filters, destination })} />
-      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={filters.gapsOnly} onChange={event => setFilters({ ...filters, gapsOnly: event.target.checked })} /> Somente com gaps</label>
-      <button className="ddf-button secondary" onClick={() => setFilters({ query: '', category: '', brandId: '', storeId: '', destination: '', gapsOnly: false })}>Limpar filtros</button>
-    </section>
-    <section className="grid gap-4 md:grid-cols-3"><Metric label="Produtos prontos" value={allRecords.length} /><Metric label="Ofertas cadastradas" value={data.catalog.offers.length} /><Metric label="Resultado dos filtros" value={records.length} /></section>
-    {!loadError && <PartyManager catalog={data.catalog} onSave={(kind, id, name) => act(command('catalog.upsertParty', { kind, id, name, active: true }), `${kind === 'brand' ? 'Marca' : 'Loja'} cadastrada.`)} />}
-    {records.length === 0 && <div className="surface p-8"><h2 className="text-lg font-semibold">Nenhum produto encontrado</h2><p className="mt-2 text-gray-600">Finalize um Master Product ou ajuste os filtros do catálogo.</p></div>}
-    {records.map(record => {
-      const product = record.product; const variants = product.spec?.variants ?? []; const approvedMedia = record.media.filter(item => item.status === 'APROVADA'); const gaps = [...productGaps(product), ...Object.entries(record.destinationGaps).flatMap(([destination, items]) => items.map(item => `${destination}: ${item}`))];
-      return <article key={product.id} className="surface overflow-hidden"><div className="grid gap-5 p-6 lg:grid-cols-[1fr_auto]"><div><div className="flex flex-wrap gap-2 text-xs"><span className="rounded bg-green-100 px-2 py-1 text-green-900">Pronto</span><span className="rounded bg-stone-200 px-2 py-1">{product.category || 'Sem categoria'}</span><span className="rounded bg-stone-200 px-2 py-1">Versão {product.version}</span></div><h2 className="mt-3 text-2xl font-semibold">{product.universalTitle}</h2><p className="mt-2 text-gray-600">{product.shortDescription}</p><div className="mt-4 flex flex-wrap gap-4 text-sm"><strong>{variants.length} variante(s)</strong><strong>{approvedMedia.length} mídia(s) aprovada(s)</strong><strong>{record.offers.length} oferta(s)</strong><strong>{record.assignment.destinations.length} destino(s)</strong></div></div><button className="ddf-button secondary" aria-expanded={expanded === product.id} onClick={() => setExpanded(expanded === product.id ? null : product.id)}>{expanded === product.id ? 'Fechar detalhes' : 'Ver detalhes'}</button></div>
-      {expanded === product.id && <div className="border-t border-stone-200 p-6"><div className="grid gap-6 lg:grid-cols-2">
-        <Detail title="Variantes e atributos">{variants.length ? variants.map(item => <div key={item.id} className="border-t border-stone-200 py-3 text-sm"><strong>{item.title || item.sku}</strong><p>SKU {item.sku} · GTIN {item.gtin || 'não informado'} · {item.weightGrams ?? '—'} g</p><p>{Object.entries(item.attributes).map(([key, value]) => `${key}: ${value}`).join(' · ') || 'Sem atributos adicionais'}</p></div>) : <Empty text="Nenhuma variante cadastrada." />}</Detail>
-        <Detail title="Mídia aprovada">{approvedMedia.length ? approvedMedia.map(item => <a className="block border-t border-stone-200 py-3 text-sm underline" href={item.url} target="_blank" rel="noreferrer" key={item.id}>{item.purpose} · {item.kind} · {item.mimeType || 'formato não informado'}</a>) : <Empty text="Nenhuma mídia aprovada." />}</Detail>
-        <Detail title="Ofertas e custos">{record.offers.length ? record.offers.map(item => <div className="border-t border-stone-200 py-3 text-sm" key={item.id}><strong>{item.supplierName} · {item.supplierRef}</strong><p>{money(item.cost, item.currency)} · estoque {item.stock ?? 'não informado'} · prazo {item.leadTimeDays ?? '—'} dias</p></div>) : <Empty text="Nenhuma Supplier Offer cadastrada." />}<OfferForm productId={product.id} onSave={input => act(command('catalog.addOffer', { ...input }), 'Oferta cadastrada sem acionar o fornecedor.')} /></Detail>
-        <Detail title="Pricing disponível">{record.prices.length ? record.prices.map(item => <div className="border-t border-stone-200 py-3 text-sm" key={item.id}><strong>{item.channel || 'Sem canal'} · {item.store || 'Sem loja'} · {item.status}</strong><p>Custo real {money(item.totalFixedCost, item.currency)} · sugerido {item.suggestedPrice === null ? 'bloqueado' : money(item.suggestedPrice, item.currency)}</p></div>) : <Empty text="Nenhum cálculo de preço." />}</Detail>
-        <Detail title="Destinos e gaps"><p className="text-sm"><strong>Elegíveis:</strong> {record.assignment.destinations.join(', ') || 'nenhum selecionado'}</p>{gaps.length ? <ul className="mt-2 list-disc pl-5 text-sm text-amber-800">{gaps.map(item => <li key={item}>{item}</li>)}</ul> : <p className="mt-2 text-sm text-green-800">Sem gaps registrados.</p>}</Detail>
-        <Detail title="Histórico">{record.history.length ? record.history.map(item => <p className="border-t border-stone-200 py-2 text-sm" key={item.id}>{item.action.replaceAll('_', ' ')} · versão {item.version} · {new Date(item.at).toLocaleString('pt-BR')}</p>) : <Empty text="Sem eventos registrados." />}</Detail>
-      </div><AssignmentForm productId={product.id} assignment={record.assignment} brands={data.catalog.brands} stores={data.catalog.stores} onSave={input => act(command('catalog.assignProduct', { productId: product.id, ...input }), 'Associações e destinos atualizados. Nenhuma publicação foi iniciada.')} /></div>}
-      </article>;
-    })}
+    <header><p className="eyebrow">Catálogo central / distribuição futura</p><h1 className="display-title">Produtos Disponíveis</h1><p className="lede">Vitrine dos produtos mestres prontos. Aprovar, rejeitar ou arquivar aqui não publica nada automaticamente.</p></header>
+    {(error || loadError) && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border border-red-300 bg-red-50 p-4 text-red-800"><span>{error || loadError}</span>{loadError && <button className="ddf-button secondary" onClick={reload}>Tentar de novo</button>}</div>}
+    <p role="status" className="text-sm text-green-800">{message}</p>
+    <section className="grid grid-cols-3 gap-3 sm:gap-4"><Metric label="Produtos prontos" value={counts.total} /><Metric label="Aprovados" value={counts.approved} /><Metric label="Arquivados" value={counts.archived} /></section>
+    {status === 'ready' && <PartyManager catalog={states.catalog} onSave={(kind, id, name) => act(command('catalog.upsertParty', { kind, id, name, active: true }), `${kind === 'brand' ? 'Marca' : 'Loja'} cadastrada.`)} />}
+    <Storefront
+      cards={cards} stateOptions={stateOptions} defaultState="ATIVOS" bulkActions={bulkActions} onBulk={onBulk}
+      loading={status === 'loading' && !fromCache}
+      emptyText="Finalize um Master Product na Product Factory ou ajuste os filtros."
+      renderDetail={card => { const record = byId.get(card.id); return record ? <RecordDetail record={record} catalog={states.catalog} act={act} /> : null; }}
+    />
   </div>;
 }
 
-function Filter({ label, value, options, onChange }: { label: string; value: string; options: string[][]; onChange: (value: string) => void }) { return <label>{label}<select className="ddf-input" value={value} onChange={event => onChange(event.target.value)}><option value="">Todos</option>{options.map(([id, name]) => <option value={id} key={id}>{name}</option>)}</select></label>; }
-function Metric({ label, value }: { label: string; value: number }) { return <div className="surface p-5"><p className="text-sm text-gray-600">{label}</p><strong className="mt-2 block text-3xl">{value}</strong></div>; }
+function RecordDetail({ record, catalog, act }: { record: CatalogRecord; catalog: CatalogState; act: (cmd: Command, success: string) => void }) {
+  const product = record.product;
+  const gaps = [...productGaps(product), ...Object.entries(record.destinationGaps).flatMap(([destination, items]) => items.map(item => `${destination}: ${item}`))];
+  return <div className="grid gap-6 lg:grid-cols-2">
+    <Detail title="Ofertas e custos">{record.offers.length ? record.offers.map(item => <div className="border-t border-stone-200 py-3 text-sm" key={item.id}><strong>{item.supplierName} · {item.supplierRef}</strong><p>{money(item.cost, item.currency)} · estoque {item.stock ?? 'não informado'} · prazo {item.leadTimeDays ?? '—'} dias</p></div>) : <Empty text="Nenhuma Supplier Offer cadastrada." />}<OfferForm productId={product.id} onSave={input => act(command('catalog.addOffer', { ...input }), 'Oferta cadastrada sem acionar o fornecedor.')} /></Detail>
+    <Detail title="Pricing disponível">{record.prices.length ? record.prices.map(item => <div className="border-t border-stone-200 py-3 text-sm" key={item.id}><strong>{item.channel || 'Sem canal'} · {item.store || 'Sem loja'} · {item.status}</strong><p>Custo real {money(item.totalFixedCost, item.currency)} · sugerido {item.suggestedPrice === null ? 'bloqueado' : money(item.suggestedPrice, item.currency)}</p></div>) : <Empty text="Nenhum cálculo de preço." />}</Detail>
+    <Detail title="Destinos e gaps"><p className="text-sm"><strong>Elegíveis:</strong> {record.assignment.destinations.join(', ') || 'nenhum selecionado'}</p>{gaps.length ? <ul className="mt-2 list-disc pl-5 text-sm text-amber-800">{gaps.map(item => <li key={item}>{item}</li>)}</ul> : <p className="mt-2 text-sm text-green-800">Sem gaps registrados.</p>}</Detail>
+    <Detail title="Histórico">{record.history.length ? record.history.map(item => <p className="border-t border-stone-200 py-2 text-sm" key={item.id}>{item.action.replaceAll('_', ' ')} · versão {item.version} · {new Date(item.at).toLocaleString('pt-BR')}</p>) : <Empty text="Sem eventos registrados." />}</Detail>
+    <div className="lg:col-span-2"><AssignmentForm productId={product.id} assignment={record.assignment} brands={catalog.brands} stores={catalog.stores} onSave={input => act(command('catalog.assignProduct', { productId: product.id, ...input }), 'Associações e destinos atualizados. Nenhuma publicação foi iniciada.')} /></div>
+  </div>;
+}
+
+function Metric({ label, value }: { label: string; value: number }) { return <div className="surface p-4 sm:p-5"><p className="text-xs text-gray-600 sm:text-sm">{label}</p><strong className="mt-1 block text-2xl sm:text-3xl">{value}</strong></div>; }
 function Detail({ title, children }: { title: string; children: React.ReactNode }) { return <section><h3 className="text-lg font-semibold">{title}</h3><div className="mt-3">{children}</div></section>; }
 function Empty({ text }: { text: string }) { return <p className="text-sm text-gray-600">{text}</p>; }
 function PartyManager({ catalog, onSave }: { catalog: CatalogState; onSave: (kind: 'brand'|'store', id: string, name: string) => void }) { return <details className="surface p-5"><summary className="cursor-pointer font-semibold">Gerenciar marcas e lojas</summary><p className="mt-2 text-sm text-gray-600">Dimensões comerciais reutilizáveis. Um produto pode pertencer a várias marcas e lojas.</p><form className="mt-4 grid gap-3 md:grid-cols-3" onSubmit={event => { event.preventDefault(); const form = new FormData(event.currentTarget); const name = String(form.get('name')); const id = name.trim().toLocaleLowerCase().replace(/[^a-z0-9]+/g, '-'); onSave(String(form.get('kind')) as 'brand'|'store', id, name); event.currentTarget.reset(); }}><label>Tipo<select name="kind" className="ddf-input"><option value="brand">Marca</option><option value="store">Loja</option></select></label><label>Nome<input name="name" required className="ddf-input" /></label><button className="ddf-button self-end">Cadastrar dimensão</button></form><p className="mt-4 text-sm">Marcas: {catalog.brands.map(item => item.name).join(', ') || '—'} · Lojas: {catalog.stores.map(item => item.name).join(', ') || '—'}</p></details>; }
