@@ -2,7 +2,8 @@
 /* eslint-disable @next/next/no-img-element -- supplier and media URLs come from many unknown hosts; next/image would need each one allow-listed. */
 
 import { useEffect, useMemo, useState } from 'react';
-import { filterCards, suppliersOf, type StoreCard, type StoreFilters } from '@/lib/storefront';
+import { filterCards, NO_AVAILABILITY, suppliersOf, type StoreCard, type StoreFilters } from '@/lib/storefront';
+import { availabilityLabels } from '@/lib/product-fiscal';
 
 export type BulkAction = { status: string; label: string; tone?: 'primary' | 'secondary' | 'danger' };
 export type StateOption = { value: string; label: string };
@@ -19,7 +20,7 @@ const stateTone: Record<string, string> = {
   INFORMACAO_SOLICITADA: 'bg-[var(--warning-soft)] text-[var(--warning)]', TRIADO: 'bg-[var(--accent-soft)] text-[var(--accent-strong)]',
 };
 
-export function Storefront({ cards, stateOptions, defaultState = '', bulkActions, onBulk, renderDetail, emptyText, loading }: {
+export function Storefront({ cards, stateOptions, defaultState = '', bulkActions, onBulk, renderDetail, emptyText, loading, showAvailability = false }: {
   cards: StoreCard[];
   stateOptions: StateOption[];
   defaultState?: string;
@@ -28,8 +29,10 @@ export function Storefront({ cards, stateOptions, defaultState = '', bulkActions
   renderDetail?: (card: StoreCard, close: () => void) => React.ReactNode;
   emptyText: string;
   loading?: boolean;
+  // Master products carry a stock model (pronta entrega / sob encomenda); candidates do not.
+  showAvailability?: boolean;
 }) {
-  const [filters, setFilters] = useState<StoreFilters>({ query: '', minCost: '', maxCost: '', supplier: '', state: defaultState });
+  const [filters, setFilters] = useState<StoreFilters>({ query: '', minCost: '', maxCost: '', supplier: '', state: defaultState, availability: '' });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<BulkAction | null>(null);
   const [reason, setReason] = useState('Decisão em massa pela vitrine');
@@ -60,19 +63,20 @@ export function Storefront({ cards, stateOptions, defaultState = '', bulkActions
   }
 
   return <div className="space-y-5">
-    <section className="surface grid grid-cols-2 gap-x-3 gap-y-2 p-3 sm:p-4 lg:grid-cols-6" aria-label="Filtros da vitrine">
+    <section className={`surface grid grid-cols-2 gap-x-3 gap-y-2 p-3 sm:p-4 ${showAvailability ? 'lg:grid-cols-7' : 'lg:grid-cols-6'}`} aria-label="Filtros da vitrine">
       <label className="col-span-2 text-sm">Buscar<input className="ddf-input" type="search" value={filters.query} onChange={event => update({ query: event.target.value })} placeholder="Nome, fornecedor, referência, SKU" /></label>
       <label className="text-sm">Custo mínimo<input className="ddf-input" inputMode="decimal" value={filters.minCost} onChange={event => update({ minCost: event.target.value })} placeholder="0,00" /></label>
       <label className="text-sm">Custo máximo<input className="ddf-input" inputMode="decimal" value={filters.maxCost} onChange={event => update({ maxCost: event.target.value })} placeholder="999,00" /></label>
       <label className="text-sm">Fornecedor<select className="ddf-input" value={filters.supplier} onChange={event => update({ supplier: event.target.value })}><option value="">Todos</option>{suppliers.map(name => <option key={name} value={name}>{name}</option>)}</select></label>
       <label className="text-sm">Estado<select className="ddf-input" value={filters.state} onChange={event => update({ state: event.target.value })}>{stateOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+      {showAvailability && <label className="text-sm">Disponibilidade<select className="ddf-input" value={filters.availability} onChange={event => update({ availability: event.target.value })}><option value="">Todas</option><option value="PRONTA_ENTREGA">{availabilityLabels.PRONTA_ENTREGA}</option><option value="SOB_ENCOMENDA">{availabilityLabels.SOB_ENCOMENDA}</option><option value={NO_AVAILABILITY}>Sem definição</option></select></label>}
     </section>
 
     <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
       <p className="text-[var(--muted)]" aria-live="polite">{loading ? 'Carregando do servidor…' : `${visible.length} de ${cards.length} produto(s)`}</p>
       <div className="flex flex-wrap items-center gap-3">
         <label className="flex min-h-11 items-center gap-2"><input type="checkbox" className="h-5 w-5 accent-[var(--accent)]" checked={allSelected} onChange={toggleAll} disabled={!visible.length} /> Selecionar todos ({visible.length})</label>
-        {(filters.query || filters.minCost || filters.maxCost || filters.supplier || filters.state !== defaultState) && <button className="ddf-button secondary" onClick={() => { setFilters({ query: '', minCost: '', maxCost: '', supplier: '', state: defaultState }); setLimit(PAGE); }}>Limpar filtros</button>}
+        {(filters.query || filters.minCost || filters.maxCost || filters.supplier || filters.availability || filters.state !== defaultState) && <button className="ddf-button secondary" onClick={() => { setFilters({ query: '', minCost: '', maxCost: '', supplier: '', state: defaultState, availability: '' }); setLimit(PAGE); }}>Limpar filtros</button>}
       </div>
     </div>
 
@@ -90,6 +94,7 @@ export function Storefront({ cards, stateOptions, defaultState = '', bulkActions
             {card.imageUrl ? <img src={card.imageUrl} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
               : <div className="grid h-full w-full place-items-center text-xs text-[var(--muted)]">Sem foto</div>}
             <span className={`absolute bottom-2 left-2 max-w-[65%] truncate rounded-full px-2 py-1 text-[11px] font-semibold ${stateTone[card.state] ?? 'bg-white/90 text-stone-800'}`}>{card.stateLabel}</span>
+            {showAvailability && card.availability && <span className={`absolute right-2 top-2 rounded-full px-2 py-1 text-[11px] font-bold ${card.availability === 'PRONTA_ENTREGA' ? 'bg-[var(--accent)] text-[var(--accent-ink)]' : 'bg-[var(--ink)] text-[var(--brand-branco)]'}`}>{availabilityLabels[card.availability]}</span>}
             {card.images.length > 1 && <span className="absolute bottom-2 right-2 rounded-full bg-black/60 px-2 py-0.5 text-[11px] text-white">{card.images.length} fotos</span>}
           </div>
           <div className="flex flex-1 flex-col gap-2 p-3">
@@ -154,6 +159,8 @@ function ProductDetail({ card, onClose, children }: { card: StoreCard; onClose: 
             <Info label="Estoque" value={card.stock === null ? 'Não informado' : card.stock.toLocaleString('pt-BR')} />
             <Info label="Fornecedor" value={card.supplierRef ? `${card.supplier} · ${card.supplierRef}` : card.supplier} />
             {card.category && <Info label="Categoria" value={card.category} />}
+            {card.availability !== undefined || card.fiscalCompletion !== undefined ? <Info label="Disponibilidade" value={card.availability ? availabilityLabels[card.availability] : 'Sem definição'} /> : null}
+            {card.fiscalCompletion !== undefined && <Info label="Cadastro fiscal" value={`${card.fiscalCompletion}% preenchido`} />}
           </dl>
           {card.url && <a className="inline-block break-all text-sm underline" href={card.url} target="_blank" rel="noreferrer noopener">Abrir página de origem</a>}
           {card.description && <p className="whitespace-pre-wrap text-sm text-[var(--muted)]">{card.description}</p>}

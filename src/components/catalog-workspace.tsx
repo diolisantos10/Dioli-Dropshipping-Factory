@@ -7,6 +7,7 @@ import { productGaps } from '@/lib/product-factory';
 import { curationLabels, productCard } from '@/lib/storefront';
 import { formatMoney as money, Storefront, type BulkAction, type StateOption } from '@/components/storefront';
 import { useServerStates } from '@/components/use-server-states';
+import { FiscalPanel } from '@/components/fiscal-form';
 
 // Read straight from the server: /disponiveis must never depend on a browser cache being parseable.
 const NAMESPACES = ['products', 'media', 'pricing', 'catalog', 'intake'] as const;
@@ -45,7 +46,7 @@ export function CatalogWorkspace() {
     <section className="grid grid-cols-3 gap-3 sm:gap-4"><Metric label="Produtos prontos" value={counts.total} /><Metric label="Aprovados" value={counts.approved} /><Metric label="Arquivados" value={counts.archived} /></section>
     {status === 'ready' && <PartyManager catalog={states.catalog} onSave={(kind, id, name) => act(command('catalog.upsertParty', { kind, id, name, active: true }), `${kind === 'brand' ? 'Marca' : 'Loja'} cadastrada.`)} />}
     <Storefront
-      cards={cards} stateOptions={stateOptions} defaultState="ATIVOS" bulkActions={bulkActions} onBulk={onBulk}
+      cards={cards} stateOptions={stateOptions} defaultState="ATIVOS" showAvailability bulkActions={bulkActions} onBulk={onBulk}
       loading={status === 'loading' && !fromCache}
       emptyText="Finalize um Master Product na Product Factory ou ajuste os filtros."
       renderDetail={card => { const record = byId.get(card.id); return record ? <RecordDetail record={record} catalog={states.catalog} act={act} /> : null; }}
@@ -57,6 +58,7 @@ function RecordDetail({ record, catalog, act }: { record: CatalogRecord; catalog
   const product = record.product;
   const gaps = [...productGaps(product), ...Object.entries(record.destinationGaps).flatMap(([destination, items]) => items.map(item => `${destination}: ${item}`))];
   return <div className="grid gap-6 lg:grid-cols-2">
+    <div className="lg:col-span-2"><FiscalPanel product={product} /></div>
     <Detail title="Ofertas e custos">{record.offers.length ? record.offers.map(item => <div className="border-t border-stone-200 py-3 text-sm" key={item.id}><strong>{item.supplierName} · {item.supplierRef}</strong><p>{money(item.cost, item.currency)} · estoque {item.stock ?? 'não informado'} · prazo {item.leadTimeDays ?? '—'} dias</p></div>) : <Empty text="Nenhuma Supplier Offer cadastrada." />}<OfferForm productId={product.id} onSave={input => act(command('catalog.addOffer', { ...input }), 'Oferta cadastrada sem acionar o fornecedor.')} /></Detail>
     <Detail title="Pricing disponível">{record.prices.length ? record.prices.map(item => <div className="border-t border-stone-200 py-3 text-sm" key={item.id}><strong>{item.channel || 'Sem canal'} · {item.store || 'Sem loja'} · {item.status}</strong><p>Custo real {money(item.totalFixedCost, item.currency)} · sugerido {item.suggestedPrice === null ? 'bloqueado' : money(item.suggestedPrice, item.currency)}</p></div>) : <Empty text="Nenhum cálculo de preço." />}</Detail>
     <Detail title="Destinos e gaps"><p className="text-sm"><strong>Elegíveis:</strong> {record.assignment.destinations.join(', ') || 'nenhum selecionado'}</p>{gaps.length ? <ul className="mt-2 list-disc pl-5 text-sm text-amber-800">{gaps.map(item => <li key={item}>{item}</li>)}</ul> : <p className="mt-2 text-sm text-green-800">Sem gaps registrados.</p>}</Detail>

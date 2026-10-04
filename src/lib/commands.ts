@@ -3,7 +3,8 @@
 // computed payload. Identity, timestamps and IDs come from the server context, and cross-module
 // rules (approved candidate, approved media, READY product, approver role) are enforced here.
 import { addCandidate, bulkTransitionCandidates, emptyIntake, transitionCandidate, type CandidateSource, type CandidateStatus, type CandidateSupplier, type IntakeState } from './intake.ts';
-import { emptyProductFactory, markProductReady, restoreProductVersion, startProduct, updateProduct, type ProductFactoryState, type UniversalProductSpec } from './product-factory.ts';
+import { emptyProductFactory, markProductReady, restoreProductVersion, setProductAvailability, startProduct, updateProduct, updateProductFiscal, type ProductFactoryState, type UniversalProductSpec } from './product-factory.ts';
+import type { Availability, ProductFiscal, VariantLogistics } from './product-fiscal.ts';
 import { addMedia, completeTransformation, emptyMedia, enqueueTransformation, hasApprovedMedia, reviewMedia, updateTransformationJob, type MediaAsset, type MediaState, type TransformationJob } from './media-factory.ts';
 import { approvePrice, calculatePrice, emptyPricing, recalculateSupplierCost, releaseQuarantine, type PricingInput, type PricingState } from './pricing.ts';
 import { advanceOrder, emptyOrders, flagOrderException, purgeExpiredOrderData, receiveOrder, resolveOrderException, type ExceptionCategory, type ExceptionResolution, type OrderState, type OrderStatus } from './orders.ts';
@@ -141,6 +142,13 @@ export const COMMANDS: Record<string, Handler> = {
     longDescription: str(i, 'longDescription', 20000, false), bullets: strings(i, 'bullets', 20), benefits: strings(i, 'benefits', 20), tags: strings(i, 'tags', 50),
     spec: i.spec === undefined ? undefined : obj(i, 'spec') as unknown as UniversalProductSpec,
   }, c.at, c.actor) },
+  'products.updateFiscal': { writes: 'products', reads: [], roles: always(OPERATE), run: (s, i, c) => {
+    const fiscal = obj(i, 'fiscal');
+    const variants = i.variants === undefined ? [] : i.variants;
+    if (!Array.isArray(variants) || variants.length > 200 || variants.some((item) => !item || typeof item !== 'object' || Array.isArray(item))) throw new CommandError('Lista inválida: variants.');
+    return updateProductFiscal(s.products, str(i, 'productId', 80), { fiscal: Object.fromEntries(['ncm', 'cest', 'origin', 'unit', 'brand', 'model', 'warranty'].map((key) => [key, str(fiscal, key, 200, false)])) as Partial<ProductFiscal>, variants: variants as Partial<VariantLogistics>[] }, c.at, c.actor);
+  } },
+  'products.setAvailability': { writes: 'products', reads: [], roles: always(OPERATE), run: (s, i, c) => setProductAvailability(s.products, str(i, 'productId', 80), oneOf(i, 'availability', ['PRONTA_ENTREGA', 'SOB_ENCOMENDA'] as const) as Availability, c.at, c.actor) },
   'products.restoreVersion': { writes: 'products', reads: [], roles: always(OPERATE), run: (s, i, c) => restoreProductVersion(s.products, str(i, 'productId', 80), num(i, 'version'), c.at, c.actor) },
   // Approved media is read from the persisted Media Factory, never trusted from the browser.
   'products.markReady': { writes: 'products', reads: ['media'], roles: always(APPROVE), run: (s, i, c) => {

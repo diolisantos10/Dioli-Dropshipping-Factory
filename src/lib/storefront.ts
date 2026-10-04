@@ -4,6 +4,7 @@ import type { CatalogRecord, CurationStatus } from './catalog.ts';
 import type { Candidate, CandidateStatus } from './intake.ts';
 import type { MediaAsset } from './media-factory.ts';
 import type { PriceCalculation } from './pricing.ts';
+import { fiscalCompletion, type Availability } from './product-fiscal.ts';
 
 export type CardVariant = { id: string; label: string; detail: string; price: number | null; stock: number | null; imageUrl: string };
 export type StoreCard = {
@@ -11,8 +12,11 @@ export type StoreCard = {
   cost: number | null; currency: string; suggestedPrice: number | null; priceCurrency: string;
   stock: number | null; supplier: string; supplierRef: string; state: string; stateLabel: string;
   category: string; url: string; description: string; variants: CardVariant[]; searchText: string;
+  // Stock model badge; only master products carry it (candidates have no stock model yet).
+  availability?: Availability; fiscalCompletion?: number;
 };
-export type StoreFilters = { query?: string; minCost?: string; maxCost?: string; supplier?: string; state?: string };
+export type StoreFilters = { query?: string; minCost?: string; maxCost?: string; supplier?: string; state?: string; availability?: string };
+export const NO_AVAILABILITY = 'SEM_DEFINICAO';
 
 const IMAGE_URL = /\.(jpe?g|png|webp|avif|gif)(\?|#|$)/i;
 const line = (notes: string, label: string) => notes.split('\n').find(item => item.toLocaleLowerCase('pt-BR').startsWith(`${label}:`))?.slice(label.length + 1).trim() ?? '';
@@ -85,6 +89,7 @@ export function productCard(record: CatalogRecord, candidate?: Candidate, curati
     supplier: cheapest?.supplierName ?? origin?.supplier ?? 'Sem fornecedor', supplierRef: cheapest?.supplierRef ?? origin?.supplierRef ?? '',
     state, stateLabel: curationLabels[state], category: product.category, url: origin?.url ?? '',
     description: product.shortDescription || product.longDescription, variants: variants.length ? variants : origin?.variants ?? [],
+    availability: product.availability, fiscalCompletion: fiscalCompletion(product),
   };
   const skus = (product.spec?.variants ?? []).map(item => `${item.sku} ${item.title}`);
   return { ...card, searchText: [card.title, card.category, card.supplier, card.supplierRef, ...product.tags, ...skus].join(' ').toLocaleLowerCase('pt-BR') };
@@ -100,6 +105,7 @@ export function filterCards(cards: StoreCard[], filters: StoreFilters) {
     && (min === null || (card.cost !== null && card.cost >= min))
     && (max === null || (card.cost !== null && card.cost <= max))
     && (!filters.supplier || card.supplier === filters.supplier)
-    && (!filters.state || (filters.state === ACTIVE_STATES ? card.state !== 'ARQUIVADO' : card.state === filters.state)));
+    && (!filters.state || (filters.state === ACTIVE_STATES ? card.state !== 'ARQUIVADO' : card.state === filters.state))
+    && (!filters.availability || (filters.availability === NO_AVAILABILITY ? !card.availability : card.availability === filters.availability)));
 }
 export const suppliersOf = (cards: StoreCard[]) => [...new Set(cards.map(card => card.supplier).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
