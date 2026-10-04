@@ -103,14 +103,14 @@ export default async function ModulePage({ params }: { params: Promise<{ slug: s
 
   return (
     <div className="space-y-9">
-      <section className="border-b border-[#ddd9d1] pb-9">
+      <section className="border-b border-[var(--line)] pb-9">
         <p className="eyebrow">{moduleDefinition.eyebrow}</p>
         <div className="flex flex-wrap items-start justify-between gap-6">
           <div>
             <h1 className="display-title">{moduleDefinition.title}</h1>
             <p className="lede">{moduleDefinition.description}</p>
           </div>
-          <span className={`inline-flex items-center gap-2 border px-3 py-2 text-xs font-bold ${moduleDefinition.deferred ? "border-[#d7d2ca] bg-[#ece8e1] text-[#696d75]" : "border-[#f4c5b5] bg-[#ffe5dc] text-[#a83513]"}`}>
+          <span className={`inline-flex items-center gap-2 border px-3 py-2 text-xs font-bold ${moduleDefinition.deferred ? "border-[var(--line)] bg-[var(--canvas)] text-[var(--muted)]" : "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent-strong)]"}`}>
             {moduleDefinition.deferred ? <LockKeyhole size={15} /> : <CircleDashed size={15} />}
             {moduleDefinition.deferred ? "Fase posterior" : "Em construção"}
           </span>
@@ -119,14 +119,14 @@ export default async function ModulePage({ params }: { params: Promise<{ slug: s
 
       <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
         <article className="surface p-6">
-          <p className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-[#747880]">Fluxo previsto</p>
-          <div className="mt-6 grid gap-px overflow-hidden border border-[#ddd9d1] bg-[#ddd9d1] sm:grid-cols-2">
+          <p className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">Fluxo previsto</p>
+          <div className="mt-6 grid gap-px overflow-hidden border border-[var(--line)] bg-[var(--line)] sm:grid-cols-2">
             {moduleDefinition.steps.map((step, index) => (
-              <div key={step} className="flex min-h-28 items-start gap-4 bg-[#fbfaf7] p-5">
-                <span className="font-mono text-xs font-bold text-[#ff5b2e]">0{index + 1}</span>
+              <div key={step} className="flex min-h-28 items-start gap-4 bg-[var(--surface)] p-5">
+                <span className="font-mono text-xs font-bold text-[var(--accent-strong)]">0{index + 1}</span>
                 <div>
                   <p className="text-sm font-semibold">{step}</p>
-                  <p className="mt-2 text-xs leading-5 text-[#777b83]">Contrato funcional mapeado. Interface e comportamento serão validados nesta fase.</p>
+                  <p className="mt-2 text-xs leading-5 text-[var(--muted)]">Contrato funcional mapeado. Interface e comportamento serão validados nesta fase.</p>
                 </div>
               </div>
             ))}
@@ -134,17 +134,17 @@ export default async function ModulePage({ params }: { params: Promise<{ slug: s
         </article>
 
         <aside className="space-y-4">
-          <div className="surface border-l-4 border-l-[#ff5b2e] p-5">
-            <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#8a8e96]">Princípio de projeto</p>
+          <div className="surface border-l-4 border-l-[var(--accent)] p-5">
+            <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--muted)]">Princípio de projeto</p>
             <p className="mt-3 text-base font-semibold leading-6 tracking-[-0.02em]">{moduleDefinition.principle}</p>
           </div>
           <div className="surface p-5">
             <div className="flex items-center gap-3">
-              <CheckCircle2 size={18} className="text-[#157347]" />
+              <CheckCircle2 size={18} className="text-[var(--success)]" />
               <p className="text-sm font-semibold">Blueprint incorporado</p>
             </div>
-            <p className="mt-3 text-xs leading-5 text-[#777b83]">A interface desta área será construída sobre os critérios oficiais de aceite da DDF.</p>
-            <Link href="/visao-geral" className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold text-[#d83f12] hover:underline">
+            <p className="mt-3 text-xs leading-5 text-[var(--muted)]">A interface desta área será construída sobre os critérios oficiais de aceite da DDF.</p>
+            <Link href="/visao-geral" className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold text-[var(--accent-strong)] hover:underline">
               Voltar à visão geral <ArrowRight size={14} />
             </Link>
           </div>

@@ -7,3 +7,7 @@ export function encryptIntegrationSecrets(value:Record<string,string>){const iv=
 export function decryptIntegrationSecrets(value:string|null){if(!value)return{};const raw=Buffer.from(value,'base64');const decipher=createDecipheriv('aes-256-gcm',key(),raw.subarray(0,12));decipher.setAuthTag(raw.subarray(12,28));return JSON.parse(Buffer.concat([decipher.update(raw.subarray(28)),decipher.final()]).toString('utf8')) as Record<string,string>}
 export function integrationStatusForSecrets(secrets:Record<string,string>):IntegrationStatus{return Object.values(secrets).some(Boolean)?'CONFIGURED':'DRAFT'}
 export function serializePublicIntegration(row:Record<string,unknown>){return{id:row.id,kind:row.kind,providerKey:row.provider_key,name:row.name,environment:row.environment,status:row.status,config:row.config??{},secretFields:row.secret_fields??[],capabilities:row.capabilities??[],lastTestedAt:row.last_tested_at,lastError:row.last_error,credentialExpiresAt:row.credential_expires_at??null,connectedAccount:row.connected_account??null,createdAt:row.created_at,updatedAt:row.updated_at}}
+
+// Vault rule: AI and generative media go through the Control Room gateway; products never hold AI keys.
+export const VAULT_RULE_MESSAGE='IA e mídia generativa passam pela Control Room (cofre). O produto não guarda chave de IA.';
+export function assertVaultRule(kind:string|undefined){if(kind==='PROVIDER')throw new Error(VAULT_RULE_MESSAGE)}

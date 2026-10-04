@@ -26,11 +26,11 @@ export default function FactoryMapPage() {
         <div className="section-heading"><div><h2>Fluxo principal</h2><p>A sequência normal de trabalho, do sinal inicial ao aprendizado.</p></div></div>
         <ol className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
           {flow.map((step, index) => (
-            <li key={step.title} className="relative rounded-lg border border-[#ddd9d1] bg-white p-4">
-              <span className="font-mono text-[10px] font-bold text-[#ff5b2e]">0{index + 1}</span>
+            <li key={step.title} className="relative rounded-lg border border-[var(--line)] bg-[var(--surface-strong)] p-4">
+              <span className="font-mono text-[10px] font-bold text-[var(--accent-strong)]">0{index + 1}</span>
               <strong className="mt-3 block text-sm">{step.title}</strong>
-              <span className="mt-1 block text-xs leading-5 text-[#696d75]">{step.detail}</span>
-              {index < flow.length - 1 && <ArrowRight size={16} className="absolute -right-2.5 top-1/2 z-10 hidden -translate-y-1/2 rounded-full bg-[#f4f1eb] text-[#ff5b2e] xl:block" />}
+              <span className="mt-1 block text-xs leading-5 text-[var(--muted)]">{step.detail}</span>
+              {index < flow.length - 1 && <ArrowRight size={16} className="absolute -right-2.5 top-1/2 z-10 hidden -transtone-y-1/2 rounded-full bg-[var(--canvas)] text-[var(--accent-strong)] xl:block" />}
             </li>
           ))}
         </ol>
@@ -43,10 +43,10 @@ export default function FactoryMapPage() {
             {group.items.filter((item) => item.href !== "/mapa-factory").map((item) => {
               const Icon = item.icon;
               return (
-                <Link key={item.href} href={item.href} className="surface group flex min-h-36 flex-col p-5 transition-transform hover:-translate-y-0.5 hover:border-[#ff5b2e]">
-                  <div className="flex items-start justify-between gap-4"><span className="grid h-10 w-10 place-items-center rounded-lg bg-[#ffe5dc] text-[#ff5b2e]"><Icon size={20} /></span><span className={`rounded-full px-2 py-1 text-[9px] font-bold uppercase tracking-[0.08em] ${item.phase === "agora" ? "bg-[#dff3e7] text-[#157347]" : "bg-[#fff0cf] text-[#9b5c00]"}`}>{item.phase === "agora" ? "Disponível" : "Próxima fase"}</span></div>
+                <Link key={item.href} href={item.href} className="surface group flex min-h-36 flex-col p-5 transition-transform hover:-transtone-y-0.5 hover:border-[var(--ink)]">
+                  <div className="flex items-start justify-between gap-4"><span className="grid h-10 w-10 place-items-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent-strong)]"><Icon size={20} /></span><span className={`rounded-full px-2 py-1 text-[9px] font-bold uppercase tracking-[0.08em] ${item.phase === "agora" ? "bg-[var(--success-soft)] text-[var(--success)]" : "bg-[var(--warning-soft)] text-[var(--warning)]"}`}>{item.phase === "agora" ? "Disponível" : "Próxima fase"}</span></div>
                   <strong className="mt-4 text-base tracking-[-0.02em]">{item.label}</strong>
-                  <span className="mt-1 text-xs leading-5 text-[#696d75]">{item.description}</span>
+                  <span className="mt-1 text-xs leading-5 text-[var(--muted)]">{item.description}</span>
                 </Link>
               );
             })}
@@ -54,7 +54,7 @@ export default function FactoryMapPage() {
         </section>
       ))}
 
-      <aside className="surface flex items-start gap-3 border-[#b9dfc8] bg-[#f3fbf6] p-5 text-sm leading-6 text-[#174d31]">
+      <aside className="surface flex items-start gap-3 border-[var(--success)] bg-[var(--success-soft)] p-5 text-sm leading-6 text-[var(--success)]">
         <CheckCircle2 size={20} className="mt-0.5 shrink-0" />
         <p><strong>Regra de ouro:</strong> um produto só avança quando a etapa anterior deixa evidência suficiente. Assim preço, mídia, publicação e pedidos continuam ligados à decisão original.</p>
       </aside>
