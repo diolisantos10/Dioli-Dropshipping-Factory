@@ -1,4 +1,5 @@
 import type { Candidate } from './intake';
+import { normalizeFiscal, normalizeVariantLogistics, type Availability, type ProductFiscal, type VariantLogistics } from './product-fiscal.ts';
 
 export type MasterProductStatus = 'EM_PRODUCAO' | 'PRONTO';
 export type ProductVariant = { id:string; sku:string; title:string; gtin:string; attributes:Record<string,string>; dimensions:{lengthCm:number|null;widthCm:number|null;heightCm:number|null}; weightGrams:number|null };
@@ -8,9 +9,11 @@ export type MasterProduct = {
   universalTitle: string; shortDescription: string; longDescription: string;
   category: string; bullets: string[]; benefits: string[]; tags: string[];
   spec?: UniversalProductSpec;
+  // Optional first fiscal/logistics layer and stock model; see product-fiscal.ts.
+  fiscal?: ProductFiscal; availability?: Availability;
   createdAt: string; updatedAt: string;
 };
-export type ProductEvent = { id: string; productId: string; action: 'PRODUCAO_INICIADA' | 'RASCUNHO_ATUALIZADO' | 'PRODUTO_PRONTO' | 'VERSAO_RESTAURADA'; at: string; actor: string; version: number };
+export type ProductEvent = { id: string; productId: string; action: 'PRODUCAO_INICIADA' | 'RASCUNHO_ATUALIZADO' | 'PRODUTO_PRONTO' | 'VERSAO_RESTAURADA' | 'DADOS_FISCAIS_ATUALIZADOS' | 'DISPONIBILIDADE_ALTERADA'; at: string; actor: string; version: number };
 export type ProductVersionSnapshot={productId:string;version:number;snapshot:MasterProduct;at:string;actor:string};
 export type ProductFactoryState = { version: 1; products: MasterProduct[]; events: ProductEvent[]; versions?:ProductVersionSnapshot[] };
 export const PRODUCT_STORAGE_KEY = 'ddf.products.demo.v1';
@@ -62,4 +65,30 @@ export function productVersionDiff(before: MasterProduct, after: MasterProduct):
   ];
   const display = (value: unknown) => typeof value === 'string' ? value : JSON.stringify(value);
   return fields.filter(([, a, b]) => JSON.stringify(a) !== JSON.stringify(b)).map(([field, a, b]) => ({ field, before: display(a), after: display(b) }));
+}
+
+// Fiscal data, variant logistics and availability change over the product's life (stock moves,
+// the accountant fills NCM later), so unlike the commercial draft they stay editable after PRONTO.
+// Each change is a new version with a snapshot, like every other product edit.
+function versioned(state: ProductFactoryState, current: MasterProduct, next: MasterProduct, action: ProductEvent['action'], at: string, actor: string): ProductFactoryState {
+  const version = current.version + 1;
+  const saved = { ...next, version, updatedAt: at };
+  return { ...state, products: state.products.map(p => p.id === current.id ? saved : p), events: [{ id: `${current.id}:${version}`, productId: current.id, action, at, actor, version }, ...state.events], versions: [{ productId: current.id, version, snapshot: saved, at, actor }, ...(state.versions ?? [])] };
+}
+export function updateProductFiscal(state: ProductFactoryState, id: string, input: { fiscal: Partial<ProductFiscal>; variants?: Partial<VariantLogistics>[] }, at: string, actor = 'Aprovador · controlado'): ProductFactoryState {
+  const current = state.products.find(p => p.id === id);
+  if (!current) throw new Error('Produto mestre não encontrado.');
+  const fiscal = normalizeFiscal(input.fiscal);
+  const spec = current.spec ?? emptyUniversalSpec;
+  const patches = new Map((input.variants ?? []).map(item => { const clean = normalizeVariantLogistics(item); return [clean.id, clean]; }));
+  for (const variantId of patches.keys()) if (!spec.variants.some(variant => variant.id === variantId)) throw new Error(`Variação ${variantId} não existe neste produto.`);
+  const variants = spec.variants.map(variant => { const patch = patches.get(variant.id); return patch ? { ...variant, gtin: patch.gtin, weightGrams: patch.weightGrams, dimensions: patch.dimensions } : variant; });
+  return versioned(state, current, { ...current, fiscal, spec: { ...spec, variants } }, 'DADOS_FISCAIS_ATUALIZADOS', at, actor);
+}
+export function setProductAvailability(state: ProductFactoryState, id: string, availability: Availability, at: string, actor = 'Aprovador · controlado'): ProductFactoryState {
+  const current = state.products.find(p => p.id === id);
+  if (!current) throw new Error('Produto mestre não encontrado.');
+  if (availability !== 'PRONTA_ENTREGA' && availability !== 'SOB_ENCOMENDA') throw new Error('Disponibilidade inválida.');
+  if (current.availability === availability) return state;
+  return versioned(state, current, { ...current, availability }, 'DISPONIBILIDADE_ALTERADA', at, actor);
 }
