@@ -21,7 +21,7 @@ export function OrdersWorkspace(){
   <form className="surface grid gap-4 p-6" onSubmit={event=>{event.preventDefault();const data=new FormData(event.currentTarget);act(command('orders.receive',{externalOrderId:String(data.get('externalId')),productId:String(data.get('productId')),salePrice:Number(data.get('salePrice')),costSnapshot:Number(data.get('cost')),currency:'BRL',customerRef:String(data.get('customerRef'))}),'Pedido simulado recebido.')}}>
    <h2 className="text-xl font-semibold">Simular pedido recebido</h2>
    <label>ID externo<input required name="externalId" className="ddf-input"/></label>
-   <label>Referência opaca do cliente <span className="text-xs text-slate-500">(opcional; nunca use nome, e-mail, telefone ou documento)</span><input name="customerRef" maxLength={100} className="ddf-input" placeholder="customer_8f4b"/></label>
+   <label>Referência opaca do cliente <span className="text-xs text-[var(--muted)]">(opcional; nunca use nome, e-mail, telefone ou documento)</span><input name="customerRef" maxLength={100} className="ddf-input" placeholder="customer_8f4b"/></label>
    <label>Produto<select required name="productId" className="ddf-input"><option value="">Selecione</option>{products.products.filter(item=>item.status==='PRONTO').map(item=><option value={item.id} key={item.id}>{item.universalTitle}</option>)}</select></label>
    <div className="grid gap-4 sm:grid-cols-2"><label>Preço da venda<input required type="number" min="0.01" step="0.01" name="salePrice" className="ddf-input"/></label><label>Custo no momento da venda<input required type="number" min="0" step="0.01" name="cost" className="ddf-input"/></label></div>
    <button className="ddf-button">Receber pedido simulado</button>
@@ -33,7 +33,7 @@ export function OrdersWorkspace(){
     <div className="flex justify-between"><h2 className="font-semibold">{order.externalOrderId}</h2><span>{order.status}</span></div>
     <p>{products.products.find(product=>product.id===order.productId)?.universalTitle??order.productId}</p>
     <p>Venda R$ {order.salePrice.toFixed(2)} · custo snapshot R$ {order.costSnapshot.toFixed(2)}</p>
-    <p className="text-sm text-slate-600">Retenção do vínculo: {new Date(order.retentionUntil||order.createdAt).toLocaleDateString('pt-BR')}</p>
+    <p className="text-sm text-[var(--muted)]">Retenção do vínculo: {new Date(order.retentionUntil||order.createdAt).toLocaleDateString('pt-BR')}</p>
     {order.exceptionReason&&<p role="alert" className="border border-red-200 bg-red-50 p-3 text-red-800">Exceção ({order.exceptionCategory??'OUTRO'}): {order.exceptionReason}</p>}
     {next[order.status]&&<button className="ddf-button" onClick={()=>act(command('orders.advance',{orderId:order.id,status:next[order.status]!}),'Pedido avançado.')}>Avançar para {next[order.status]}</button>}
     {order.status==='EM_FULFILLMENT'&&<form className="flex gap-3" onSubmit={event=>{event.preventDefault();const data=new FormData(event.currentTarget);act(command('orders.advance',{orderId:order.id,status:'ENVIADO',tracking:String(data.get('tracking'))}),'Tracking registrado.')}}><input required name="tracking" className="ddf-input" placeholder="Código de tracking"/><button className="ddf-button">Marcar enviado</button></form>}

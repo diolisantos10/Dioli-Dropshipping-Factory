@@ -1,28 +1,59 @@
 @import "tailwindcss";
 
-.ddf-input { display: block; width: 100%; margin-top: 8px; padding: 12px; border: 1px solid #b8b1a7; border-radius: 6px; background: white; color: #17191d; }
-.ddf-button { width: fit-content; min-height: 44px; padding: 10px 18px; background: #17191d; color: white; border: 1px solid #17191d; border-radius: 6px; cursor: pointer; }
-.ddf-button.secondary { background: white; color: #17191d; }
-.ddf-button:hover { outline: 2px solid #ff5b2e; }
+/* DDF brand tokens — single source for colour and type (DDF Branding Book).
+   Book colours: Grafite #171C20 (base), Branco suave #F4F6F3 (surfaces / text on grafite),
+   Lima #C4F25A (highlight and action, used sparingly). Everything else below is a derived tint
+   or a functional status colour, chosen for WCAG AA contrast against these three.
+   Lima is never used as text on light backgrounds (1.2:1); on light it is a fill under grafite text. */
+@font-face { font-family: "DejaVu Sans"; src: url("/fonts/dejavu-sans-400.woff2") format("woff2"); font-weight: 400 600; font-style: normal; font-display: swap; }
+@font-face { font-family: "DejaVu Sans"; src: url("/fonts/dejavu-sans-700.woff2") format("woff2"); font-weight: 700 900; font-style: normal; font-display: swap; }
 
 :root {
-  --ink: #17191d;
-  --muted: #696d75;
-  --line: #ddd9d1;
-  --canvas: #f4f1eb;
-  --surface: #fbfaf7;
-  --surface-strong: #ffffff;
-  --rail: #15171b;
-  --rail-muted: #969aa3;
-  --accent: #ff5b2e;
-  --accent-soft: #ffe5dc;
-  --success: #157347;
-  --success-soft: #dff3e7;
-  --warning: #9b5c00;
-  --warning-soft: #fff0cf;
-  --danger: #b42318;
-  --danger-soft: #fde5e2;
+  --brand-grafite: #171C20;
+  --brand-branco: #F4F6F3;
+  --brand-lima: #C4F25A;
+
+  --ink: var(--brand-grafite);
+  --muted: #5A6168;            /* 5.8:1 on surface */
+  --line: #D6DBD4;
+  --canvas: #E9ECE7;           /* derived: branco suave, one step darker for page depth */
+  --surface: var(--brand-branco);
+  --surface-strong: #FFFFFF;
+  --rail: var(--brand-grafite);
+  --rail-ink: var(--brand-branco);
+  --rail-muted: #A9B0AA;       /* 7.7:1 on grafite */
+  --rail-line: #2B3238;
+  --rail-hover: #222930;
+  --accent: var(--brand-lima);
+  --accent-ink: var(--brand-grafite); /* text on lima: 13.2:1 */
+  --accent-soft: #EEF8D8;
+  --accent-strong: #4B6A10;    /* lima family readable on light: 5.7:1 */
+  --success: #1E6B3A;
+  --success-soft: #E2F1E5;
+  --warning: #8A4B00;
+  --warning-soft: #FBEFD6;
+  --danger: #A4271C;
+  --danger-soft: #FBE4E1;
+  --font-brand: "DejaVu Sans", "Bitstream Vera Sans", Verdana, "Segoe UI", sans-serif;
 }
+
+/* Map Tailwind's neutral and status scales onto the brand so existing utilities follow the tokens. */
+@theme {
+  --font-sans: "DejaVu Sans", "Bitstream Vera Sans", Verdana, "Segoe UI", sans-serif;
+  --color-gray-600: #5A6168; --color-gray-500: #6B7279;
+  --color-stone-100: #EEF1EC; --color-stone-200: #E2E6E0; --color-stone-300: #D6DBD4; --color-stone-700: #3A4147;
+  --color-red-50: #FBE4E1; --color-red-100: #F8D6D1; --color-red-300: #E2A69E; --color-red-700: #A4271C; --color-red-800: #8C2118; --color-red-900: #6F1A13;
+  --color-green-50: #E2F1E5; --color-green-100: #D3EAD8; --color-green-300: #A9D3B3; --color-green-800: #1E6B3A; --color-green-900: #17532D;
+  --color-amber-50: #FBEFD6; --color-amber-100: #F8E6BF; --color-amber-800: #8A4B00; --color-amber-900: #6E3C00;
+}
+
+.ddf-input { display: block; width: 100%; margin-top: 8px; padding: 12px; border: 1px solid #B7BEB6; border-radius: 6px; background: var(--surface-strong); color: var(--ink); }
+.ddf-input:focus { border-color: var(--ink); outline: 3px solid color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: 1px; }
+.ddf-button { width: fit-content; min-height: 44px; padding: 10px 18px; background: var(--ink); color: var(--brand-branco); border: 1px solid var(--ink); border-radius: 6px; cursor: pointer; font-weight: 600; }
+.ddf-button.secondary { background: var(--surface-strong); color: var(--ink); }
+.ddf-button.accent { background: var(--accent); color: var(--accent-ink); border-color: var(--ink); }
+.ddf-button:hover:not(:disabled) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ddf-button:disabled { opacity: .55; cursor: not-allowed; }
 
 * {
   box-sizing: border-box;
@@ -38,7 +69,7 @@ body {
   min-height: 100vh;
   margin: 0;
   background: var(--canvas);
-  font-family: Inter, "Segoe UI", Arial, Helvetica, sans-serif;
+  font-family: var(--font-brand);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -62,11 +93,12 @@ a {
 
 ::selection {
   background: var(--accent);
-  color: white;
+  color: var(--accent-ink);
 }
 
 :focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline: 3px solid var(--accent);
+  box-shadow: 0 0 0 5px var(--ink);
   outline-offset: 3px;
 }
 
@@ -83,28 +115,28 @@ a {
   height: 100vh;
   overflow-y: auto;
   background: var(--rail);
-  color: white;
-  border-right: 1px solid #25282e;
+  color: var(--rail-ink);
+  border-right: 1px solid var(--rail-line);
 }
 
 .nav-link {
-  color: #a9adb5;
+  color: var(--rail-muted);
 }
 
 .nav-link:hover {
-  background: #21242a;
-  color: white;
+  background: var(--rail-hover);
+  color: var(--rail-ink);
 }
 
 .nav-link.is-active {
   background: var(--accent);
-  color: white !important;
-  box-shadow: 0 8px 20px rgba(255, 91, 46, 0.2);
+  color: var(--accent-ink) !important;
+  font-weight: 700;
 }
 
 .nav-link.is-active svg,
 .nav-link.is-active .nav-label {
-  color: white !important;
+  color: var(--accent-ink) !important;
   opacity: 1 !important;
   visibility: visible !important;
 }
@@ -140,7 +172,7 @@ a {
   gap: 8px;
   margin: 0 0 10px;
   color: var(--muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-brand);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -150,16 +182,16 @@ a {
 .eyebrow::before {
   width: 18px;
   height: 2px;
-  background: var(--accent);
+  background: var(--ink);
   content: "";
 }
 
 .display-title {
   max-width: 820px;
   margin: 0;
-  font-size: clamp(34px, 4vw, 58px);
-  font-weight: 720;
-  letter-spacing: -0.055em;
+  font-size: clamp(30px, 3.4vw, 48px);
+  font-weight: 700;
+  letter-spacing: -0.035em;
   line-height: 0.98;
 }
 
@@ -175,7 +207,7 @@ a {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 12px;
-  box-shadow: 0 1px 0 rgba(20, 22, 26, 0.03);
+  box-shadow: 0 1px 0 rgba(23, 28, 32, 0.04);
 }
 
 .section-heading {

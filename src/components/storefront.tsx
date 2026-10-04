@@ -16,7 +16,7 @@ export function formatMoney(value: number | null, currency: string) {
 const stateTone: Record<string, string> = {
   APROVADO: 'bg-[var(--success-soft)] text-[var(--success)]', PRONTO: 'bg-[var(--success-soft)] text-[var(--success)]',
   REJEITADO: 'bg-[var(--danger-soft)] text-[var(--danger)]', ARQUIVADO: 'bg-stone-200 text-stone-700',
-  INFORMACAO_SOLICITADA: 'bg-[var(--warning-soft)] text-[var(--warning)]', TRIADO: 'bg-[var(--accent-soft)] text-[#a33a17]',
+  INFORMACAO_SOLICITADA: 'bg-[var(--warning-soft)] text-[var(--warning)]', TRIADO: 'bg-[var(--accent-soft)] text-[var(--accent-strong)]',
 };
 
 export function Storefront({ cards, stateOptions, defaultState = '', bulkActions, onBulk, renderDetail, emptyText, loading }: {
@@ -81,7 +81,7 @@ export function Storefront({ cards, stateOptions, defaultState = '', bulkActions
     {!loading && visible.length === 0 && <div className="surface p-8 text-center"><h2 className="text-lg font-semibold">Nenhum produto nesta vitrine</h2><p className="mt-2 text-[var(--muted)]">{emptyText}</p></div>}
 
     <ul className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5" aria-label="Produtos">
-      {shown.map(card => <li key={card.id} className={`surface group relative flex flex-col overflow-hidden transition-shadow hover:shadow-lg ${selected.has(card.id) ? 'ring-2 ring-[var(--accent)]' : ''}`}>
+      {shown.map(card => <li key={card.id} className={`surface group relative flex flex-col overflow-hidden transition-shadow hover:shadow-lg ${selected.has(card.id) ? 'ring-2 ring-[var(--ink)] ring-offset-2 ring-offset-[var(--accent)]' : ''}`}>
         <label className="absolute left-2 top-2 z-10 grid h-10 w-10 cursor-pointer place-items-center rounded-full bg-white/90 shadow" title="Selecionar">
           <input type="checkbox" className="h-5 w-5 accent-[var(--accent)]" checked={selected.has(card.id)} onChange={() => toggle(card.id)} aria-label={`Selecionar ${card.title}`} />
         </label>
@@ -109,7 +109,7 @@ export function Storefront({ cards, stateOptions, defaultState = '', bulkActions
     {selectedVisible.length > 0 && <div className="sticky bottom-14 z-30 rounded-xl sm:bottom-3 border border-[var(--line)] bg-[var(--surface-strong)] p-3 shadow-2xl" role="region" aria-label="Ações em massa">
       {!pending ? <div className="flex flex-wrap items-center gap-2">
         <strong className="mr-auto text-sm">{selectedVisible.length} selecionado(s)</strong>
-        {bulkActions.map(action => <button key={action.status} className={`ddf-button !px-3 sm:!px-[18px] ${action.tone === 'primary' ? '' : 'secondary'} ${action.tone === 'danger' ? 'text-[var(--danger)]' : ''}`} onClick={() => setPending(action)}>{action.label}</button>)}
+        {bulkActions.map(action => <button key={action.status} className={`ddf-button !px-3 sm:!px-[18px] ${action.tone === 'primary' ? 'accent' : 'secondary'} ${action.tone === 'danger' ? 'text-[var(--danger)]' : ''}`} onClick={() => setPending(action)}>{action.label}</button>)}
         <button className="ddf-button secondary" onClick={() => setSelected(new Set())}>Limpar</button>
       </div> : <form className="space-y-2" onSubmit={event => { event.preventDefault(); void confirm(); }}>
         <p className="text-sm"><strong>{pending.label}</strong> {selectedVisible.length} produto(s). Itens que não aceitam esta decisão são ignorados e informados.</p>
@@ -143,7 +143,7 @@ function ProductDetail({ card, onClose, children }: { card: StoreCard; onClose: 
             {image ? <img src={image} alt={card.title} referrerPolicy="no-referrer" className="h-full w-full object-contain" /> : <div className="grid h-full place-items-center text-sm text-[var(--muted)]">Sem foto</div>}
           </div>
           {card.images.length > 1 && <div className="mt-3 flex gap-2 overflow-x-auto pb-1" aria-label="Todas as fotos">
-            {card.images.map((url, index) => <button key={url} type="button" onClick={() => setActive(index)} className={`h-16 w-16 flex-none overflow-hidden rounded-md border-2 ${index === active ? 'border-[var(--accent)]' : 'border-transparent'}`} aria-label={`Foto ${index + 1}`}><img src={url} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-full w-full object-cover" /></button>)}
+            {card.images.map((url, index) => <button key={url} type="button" onClick={() => setActive(index)} className={`h-16 w-16 flex-none overflow-hidden rounded-md border-2 ${index === active ? 'border-[var(--ink)]' : 'border-transparent'}`} aria-label={`Foto ${index + 1}`}><img src={url} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-full w-full object-cover" /></button>)}
           </div>}
         </div>
         <div className="space-y-4">
