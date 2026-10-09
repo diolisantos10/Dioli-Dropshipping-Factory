@@ -11,6 +11,7 @@ import { supplierCandidateInput } from './supplier-product';
 import { persistSupplierOriginals } from './supplier-media-archive';
 import { SUPPLIER_IMPORT_REVISION } from './providers/supplier-content.ts';
 import { readSupplierImages } from './providers/supplier-vision.ts';
+import { supplierForImageReading } from './providers/supplier-stored.ts';
 
 const IDENTITY = { role: 'SYSTEM', actor: 'system:factory-production' };
 export const studioCapabilityStatus = () => ({ available: false, code: 'studio_pipeline_pending',
@@ -18,7 +19,7 @@ export const studioCapabilityStatus = () => ({ available: false, code: 'studio_p
 
 async function enrichCandidateImages(correlationId: string) {
   const intake = ((await readState('intake'))?.payload ?? emptyIntake) as IntakeState;
-  const pending = intake.candidates.filter(candidate => candidate.supplier?.images.length && !candidate.supplier.vision?.completed && !['REJEITADO', 'ARQUIVADO'].includes(candidate.status));
+  const pending = intake.candidates.map(candidate => ({ ...candidate, supplier: supplierForImageReading(candidate) })).filter(candidate => candidate.supplier && (!candidate.supplier.vision?.completed || candidate.supplier.images.some(url => !candidate.supplier!.vision!.processedImages.includes(url))) && !['REJEITADO', 'ARQUIVADO'].includes(candidate.status));
   if (pending.length && !gatewayConfigurationStatus().configured) return { checked: 0, failed: 0, remaining: pending.length, blocked: pending.length, reason: 'gateway_not_configured', results: [] };
   const results: { candidateId: string; status: string; code?: string }[] = [];
   for (const candidate of pending.slice(0, 2)) {
