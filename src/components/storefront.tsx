@@ -187,11 +187,21 @@ function Info({ label, value }: { label: string; value: string }) {
 }
 
 function SupplierInformation({ supplier }: { supplier: NonNullable<StoreCard['sourceDetails']> }) {
-  const missing = 'Não informado pelo fornecedor';
+  const missing = 'Ainda não confirmado';
+  const sourceNames = { title: 'Título', description: 'Descrição', specification: 'Ficha técnica', variant: 'Variação', image: 'Foto' };
+  const facts = [...new Map([...(supplier.facts ?? []), ...supplier.variants.flatMap(variant => variant.facts ?? [])].map(fact => [JSON.stringify(fact), fact])).values()];
+  const conflicting = new Map<string, Set<number>>();
+  for (const fact of facts) {
+    const key = `${fact.sku ?? ''}:${fact.field}`;
+    const values = conflicting.get(key) ?? new Set<number>(); values.add(fact.value); conflicting.set(key, values);
+  }
+  const conflicts = [...conflicting.values()].some(values => values.size > 1);
   const dimensions = (value: typeof supplier.dimensions) => value && Object.values(value).some(item => item !== undefined)
     ? [value.lengthCm, value.widthCm, value.heightCm].map(item => item === undefined ? '?' : item.toLocaleString('pt-BR')).join(' × ') + ' cm (C × L × A)' : missing;
   return <section className="space-y-3">
     <h3 className="font-semibold">Dados brutos do fornecedor</h3>
+    <p className="text-sm text-[var(--muted)]">{supplier.vision?.completed ? 'Leitura das fotos concluída.' : supplier.images.length ? `Leitura das fotos pendente: ${supplier.vision?.processedImages.length ?? 0} de ${supplier.images.length} analisadas.` : 'Nenhuma foto disponível para leitura.'} Campos sem confirmação permanecem em aberto.</p>
+    {conflicts && <p className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">Há medidas conflitantes nas fontes. Confira as evidências antes de concluir o cadastro.</p>}
     <dl className="grid grid-cols-2 gap-3 text-sm">
       <Info label="Dimensões do produto" value={dimensions(supplier.dimensions)} />
       <Info label="Peso do produto" value={supplier.weightGrams === undefined ? missing : `${supplier.weightGrams.toLocaleString('pt-BR')} g`} />
@@ -205,6 +215,8 @@ function SupplierInformation({ supplier }: { supplier: NonNullable<StoreCard['so
       <Info label="Avaliação" value={supplier.rating === undefined ? missing : String(supplier.rating)} />
       <Info label="Número de avaliações" value={supplier.reviewCount === undefined ? missing : supplier.reviewCount.toLocaleString('pt-BR')} />
     </dl>
+    {supplier.variants.length > 0 && <details className="text-sm"><summary className="cursor-pointer font-semibold">Medidas por variação ({supplier.variants.length})</summary><div className="mt-2 overflow-x-auto"><table className="w-full text-left"><thead><tr><th className="p-2">Variação / SKU</th><th className="p-2">Dimensões do produto</th><th className="p-2">Peso do produto</th></tr></thead><tbody>{supplier.variants.map(variant => <tr key={variant.sku}><td className="p-2">{variant.label}<br /><span className="text-xs text-[var(--muted)]">{variant.sku}</span></td><td className="p-2">{dimensions(variant.dimensions)}</td><td className="p-2">{variant.weightGrams === undefined ? missing : `${variant.weightGrams.toLocaleString('pt-BR')} g`}</td></tr>)}</tbody></table></div></details>}
+    {facts.length > 0 && <details className="text-sm"><summary className="cursor-pointer font-semibold">Evidências das medidas ({facts.length})</summary><ul className="mt-2 max-h-80 space-y-2 overflow-y-auto">{facts.map((fact, index) => <li key={index} className="rounded border border-[var(--line)] p-2"><p className="text-xs text-[var(--muted)]">{sourceNames[fact.source]}{fact.sku ? ` · SKU ${fact.sku}` : ' · sem SKU específico'}</p><p className="whitespace-pre-wrap">{fact.excerpt}</p><p>{fact.value.toLocaleString('pt-BR')} {fact.unit}</p>{fact.imageUrl && <a className="underline" href={fact.imageUrl} target="_blank" rel="noopener noreferrer">Abrir foto de origem</a>}</li>)}</ul></details>}
     <h4 className="text-sm font-semibold">Especificações técnicas originais</h4>
     {Object.keys(supplier.specifications ?? {}).length ? <dl className="grid gap-2 sm:grid-cols-2">{Object.entries(supplier.specifications ?? {}).map(([key, value]) => <Info key={key} label={key} value={value} />)}</dl> : <p className="text-sm text-[var(--muted)]">{missing}</p>}
     {supplier.rawData && <details className="text-sm"><summary className="cursor-pointer font-semibold">Ver todos os dados originais recebidos do AliExpress</summary><pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded bg-[var(--canvas)] p-3 text-xs">{JSON.stringify(supplier.rawData, null, 2)}</pre></details>}
