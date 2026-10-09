@@ -2,7 +2,7 @@
 // server, against the persisted state: the browser only sends intent (type + input) and never a
 // computed payload. Identity, timestamps and IDs come from the server context, and cross-module
 // rules (approved candidate, approved media, READY product, approver role) are enforced here.
-import { addCandidate, bulkTransitionCandidates, refreshCandidateSupplier, emptyIntake, transitionCandidate, type CandidateSource, type CandidateStatus, type CandidateSupplier, type IntakeState } from './intake.ts';
+import { addCandidate, bulkTransitionCandidates, refreshCandidateSupplier, emptyIntake, transitionCandidate, type CandidateSource, type CandidateStatus, type CandidateSupplier, type IntakeState, type SupplierFact } from './intake.ts';
 import { emptyProductFactory, markProductReady, restoreProductVersion, setProductAvailability, startProduct, updateProduct, updateProductFiscal, type ProductFactoryState, type UniversalProductSpec } from './product-factory.ts';
 import type { Availability, ProductFiscal, VariantLogistics } from './product-fiscal.ts';
 import { addMedia, completeTransformation, emptyMedia, enqueueTransformation, ingestSupplierOriginals, studioReadiness, reviewMedia, updateTransformationJob, type MediaAsset, type MediaState, type TransformationJob } from './media-factory.ts';
@@ -119,7 +119,7 @@ function supplierInput(input: Input): CandidateSupplier | undefined {
   const images = Array.isArray(raw.images) ? raw.images.map(httpsOrEmpty).filter(Boolean) : [];
   const variants = (Array.isArray(raw.variants) ? raw.variants : []).map((value) => {
     const item = (value && typeof value === 'object' ? value : {}) as Input;
-    return { sku: String(item.sku ?? '').slice(0, 120), label: String(item.label ?? '').slice(0, 300), price: finiteOrNull(item.price), stock: finiteOrNull(item.stock), imageUrl: httpsOrEmpty(item.imageUrl), attributes: stringRecord(item.attributes) };
+    return { sku: String(item.sku ?? '').slice(0, 120), label: String(item.label ?? '').slice(0, 300), price: finiteOrNull(item.price), stock: finiteOrNull(item.stock), imageUrl: httpsOrEmpty(item.imageUrl), attributes: stringRecord(item.attributes), dimensions: supplierDimensions(item.dimensions), weightGrams: finiteOrNull(item.weightGrams) ?? undefined, facts: supplierFacts(item.facts) };
   });
   return {
     name: str(raw, 'name', 160), ref: str(raw, 'ref', 160), cost: finiteOrNull(raw.cost), currency: (str(raw, 'currency', 3, false) || 'BRL').toUpperCase(),
@@ -133,7 +133,22 @@ function supplierInput(input: Input): CandidateSupplier | undefined {
     shippingCost: finiteOrNull(raw.shippingCost) ?? undefined, sales: finiteOrNull(raw.sales) ?? undefined,
     rating: finiteOrNull(raw.rating) ?? undefined, reviewCount: finiteOrNull(raw.reviewCount) ?? undefined,
     rawData: raw.rawData && typeof raw.rawData === 'object' && !Array.isArray(raw.rawData) ? structuredClone(raw.rawData) as Record<string, unknown> : undefined,
+    importRevision: typeof raw.importRevision === 'number' && Number.isInteger(raw.importRevision) && raw.importRevision >= 1 ? raw.importRevision : undefined,
+    facts: supplierFacts(raw.facts), imageLabels: strings(raw, 'imageLabels', 1000),
   };
+}
+
+function supplierFacts(value: unknown): SupplierFact[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 1000) throw new CommandError('Evidências técnicas inválidas.');
+  return value.map(item => {
+    if (!item || typeof item !== 'object') throw new CommandError('Evidência técnica inválida.');
+    const raw = item as Input;
+    return { field: oneOf(raw, 'field', ['lengthCm', 'widthCm', 'heightCm', 'weightGrams'] as const),
+      value: num(raw, 'value'), unit: oneOf(raw, 'unit', ['cm', 'g'] as const),
+      source: oneOf(raw, 'source', ['title', 'description', 'specification', 'variant'] as const),
+      excerpt: str(raw, 'excerpt', 1000), ...(raw.sku ? { sku: str(raw, 'sku', 120) } : {}) };
+  });
 }
 
 export const COMMANDS: Record<string, Handler> = {

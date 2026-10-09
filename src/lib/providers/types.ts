@@ -1,4 +1,4 @@
-import type { SupplierDetails } from '../intake.ts';
+import type { SupplierDetails, CandidateVariant } from '../intake.ts';
 export interface ProviderAdapter {
   test(): Promise<{ ok: boolean; message: string }>;
 }
@@ -8,7 +8,7 @@ export interface SupplierAdapter extends ProviderAdapter {
     getProduct(itemId: string): Promise<SupplierProduct>;
 }
 
-export interface SupplierVariant { sku: string; label: string; price: number | null; stock: number | null; imageUrl: string; attributes?: Record<string, string> }
+export interface SupplierVariant extends CandidateVariant { imageUrl: string }
 
 export interface SupplierProduct extends SupplierDetails {
     itemId: string;

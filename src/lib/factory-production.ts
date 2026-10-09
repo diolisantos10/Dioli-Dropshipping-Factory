@@ -9,6 +9,7 @@ import { emptyMedia, studioReadiness, type MediaState } from './media-factory';
 import { getSupplierAdapterForIntegration } from './integrations';
 import { supplierCandidateInput } from './supplier-product';
 import { persistSupplierOriginals } from './supplier-media-archive';
+import { SUPPLIER_IMPORT_REVISION } from './providers/supplier-content.ts';
 
 const IDENTITY = { role: 'SYSTEM', actor: 'system:factory-production' };
 export const studioCapabilityStatus = () => ({ available: false, code: 'gateway_reference_images_unsupported',
@@ -16,7 +17,7 @@ export const studioCapabilityStatus = () => ({ available: false, code: 'gateway_
 
 export async function enrichRawCandidates(_actor: string, correlationId: string) {
   const intake = ((await readState('intake'))?.payload ?? emptyIntake) as IntakeState;
-  const pending = intake.candidates.filter(candidate => !candidate.supplier?.rawData && /\/item\/(\d+)\.html/.test(candidate.url) && /(^|\.)aliexpress\.com$/.test(new URL(candidate.url).hostname));
+  const pending = intake.candidates.filter(candidate => candidate.supplier?.importRevision !== SUPPLIER_IMPORT_REVISION && /\/item\/(\d+)\.html/.test(candidate.url) && /(^|\.)aliexpress\.com$/.test(new URL(candidate.url).hostname));
   if (!pending.length) return { checked: 0, updated: 0 };
   const db = await getDatabasePool();
   const rows = (await db.query(`SELECT id FROM integration_configs WHERE provider_key='aliexpress' AND status IN ('TESTED','ACTIVE') ORDER BY status='ACTIVE' DESC,updated_at DESC LIMIT 1`)).rows;

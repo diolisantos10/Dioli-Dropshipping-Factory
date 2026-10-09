@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
 import type { SupplierAdapter, SupplierProduct } from './types';
+import { supplierDescriptionContent, supplierMeasurements, SUPPLIER_IMPORT_REVISION } from './supplier-content.ts';
 
 // AliExpress Open Platform (IOP/GOP protocol). Business APIs go through /sync with
 // `method` as a signed parameter; system APIs (/auth/*) go through /rest{path} and
@@ -199,11 +200,16 @@ export function parseDsProduct(body: Record<string, unknown>, itemId: string, fa
     const label = properties.map((item) => text(item.property_value_definition_name ?? item.sku_property_value)).filter(Boolean).join(' / ');
     const price = priceOf(sku);
     const stock = stockOf(sku);
+    const variantId = text(sku.sku_id ?? sku.id ?? sku.sku_attr) || `sku-${index + 1}`;
+    const attributes = Object.fromEntries(properties.map(item => [text(item.sku_property_name ?? item.sku_property_id), text(item.property_value_definition_name ?? item.sku_property_value)]).filter(([key, value]) => key && value));
+    const measurements = supplierMeasurements(Object.entries(attributes).map(([key, value]) => `${key}: ${value}`).join('\n'), 'variant', variantId);
     return {
-      sku: text(sku.sku_id ?? sku.id ?? sku.sku_attr) || `sku-${index + 1}`, label: label || `Variante ${index + 1}`,
+      sku: variantId, label: label || `Variante ${index + 1}`,
       price: Number.isFinite(price) && price > 0 ? price : null, stock: typeof stock === 'number' ? stock : null,
       imageUrl: httpsUrl(properties.map((item) => text(item.sku_image)).find(Boolean)),
-      attributes: Object.fromEntries(properties.map((item) => [text(item.sku_property_name ?? item.sku_property_id), text(item.property_value_definition_name ?? item.sku_property_value)]).filter(([key, value]) => key && value)),
+      attributes, ...(measurements.dimensions ? { dimensions: measurements.dimensions } : {}),
+      ...(measurements.weightGrams ? { weightGrams: measurements.weightGrams } : {}),
+      ...(measurements.facts.length ? { facts: measurements.facts } : {}),
     };
   });
   const logistics = record(result.logistics_info_dto);
@@ -212,11 +218,23 @@ export function parseDsProduct(body: Record<string, unknown>, itemId: string, fa
   const positive = (value: unknown) => { const number = money(value); return Number.isFinite(number) && number > 0 ? number : undefined; };
   const descriptionHtml = text(base.detail ?? base.description);
   // Keep supplier HTML as evidence, but display plain text: no remote scripts or injected markup.
-  const description = descriptionHtml.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '').replace(/<(?:br|\/p|\/div|\/li)\b[^>]*>/gi, '\n').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
-  const descriptionImages = [...descriptionHtml.matchAll(/<img\b[^>]*?\bsrc=["']([^"']+)["']/gi)].map(match => httpsUrl(match[1])).filter(Boolean);
+  const content = supplierDescriptionContent(descriptionHtml);
+  const description = content.description;
+  const descriptionImages = content.images;
   // Preserve every available gallery, description and variant image, without the old 20-photo cap.
   const allImages = [...new Set([...images, ...descriptionImages, ...variants.map(variant => variant.imageUrl).filter(Boolean)])];
-  const specifications: Record<string, string> = Object.fromEntries(list(result.ae_item_properties).map(record).map(property => [text(property.attr_name ?? property.property_name), text(property.attr_value ?? property.property_value)]).filter(([key, value]) => key && value));
+  const specifications: Record<string, string> = { ...content.specifications, ...Object.fromEntries(list(result.ae_item_properties).map(record).map(property => [text(property.attr_name ?? property.property_name), text(property.attr_value ?? property.property_value)]).filter(([key, value]) => key && value)) };
+  const facts = [
+    ...supplierMeasurements(text(base.subject), 'title').facts,
+    ...supplierMeasurements(description, 'description').facts,
+    ...supplierMeasurements(Object.entries(specifications).map(([key, value]) => `${key}: ${value}`).join('\n'), 'specification').facts,
+  ];
+  const dimensions: NonNullable<SupplierProduct['dimensions']> = {};
+  for (const field of ['lengthCm', 'widthCm', 'heightCm'] as const) {
+    const values = [...new Set(facts.filter(fact => fact.field === field).map(fact => fact.value))];
+    if (values.length === 1) dimensions[field] = values[0];
+  }
+  const weightValues = [...new Set(facts.filter(fact => fact.field === 'weightGrams').map(fact => fact.value))];
   const materials = Object.entries(specifications).filter(([key]) => /material|fabric|tecido/i.test(key)).map(([, value]) => value);
   const packageDimensions = { lengthCm: positive(packageInfo.package_length), widthCm: positive(packageInfo.package_width), heightCm: positive(packageInfo.package_height) };
   const packageWeightKg = positive(packageInfo.gross_weight);
@@ -227,6 +245,9 @@ export function parseDsProduct(body: Record<string, unknown>, itemId: string, fa
     currency: (text(skus[0]?.currency_code) || text(base.currency_code) || fallbackCurrency).toUpperCase(),
     imageUrl: images[0] ?? '',
     images: allImages, variants, description, specifications, materials,
+    importRevision: SUPPLIER_IMPORT_REVISION, facts, imageLabels: content.imageLabels,
+    ...(Object.keys(dimensions).length ? { dimensions } : {}),
+    ...(weightValues.length === 1 ? { weightGrams: weightValues[0] } : {}),
     packageDimensions, packageWeightGrams: packageWeightKg === undefined ? undefined : packageWeightKg * 1000,
     sales: numeric(base.sales_count ?? base.sales), rating: numeric(base.avg_evaluation_rating), reviewCount: numeric(base.evaluation_count),
     shippingCost: numeric(logistics.freight_amount), rawData: structuredClone(result),
