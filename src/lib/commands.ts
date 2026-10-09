@@ -135,6 +135,7 @@ function supplierInput(input: Input): CandidateSupplier | undefined {
     rawData: raw.rawData && typeof raw.rawData === 'object' && !Array.isArray(raw.rawData) ? structuredClone(raw.rawData) as Record<string, unknown> : undefined,
     importRevision: typeof raw.importRevision === 'number' && Number.isInteger(raw.importRevision) && raw.importRevision >= 1 ? raw.importRevision : undefined,
     facts: supplierFacts(raw.facts), imageLabels: strings(raw, 'imageLabels', 1000),
+    ...(raw.vision ? { vision: { revision: num(obj(raw, 'vision'), 'revision'), processedImages: strings(obj(raw, 'vision'), 'processedImages', 1000), completed: obj(raw, 'vision').completed === true } } : {}),
   };
 }
 
@@ -146,8 +147,9 @@ function supplierFacts(value: unknown): SupplierFact[] {
     const raw = item as Input;
     return { field: oneOf(raw, 'field', ['lengthCm', 'widthCm', 'heightCm', 'weightGrams'] as const),
       value: num(raw, 'value'), unit: oneOf(raw, 'unit', ['cm', 'g'] as const),
-      source: oneOf(raw, 'source', ['title', 'description', 'specification', 'variant'] as const),
-      excerpt: str(raw, 'excerpt', 1000), ...(raw.sku ? { sku: str(raw, 'sku', 120) } : {}) };
+      source: oneOf(raw, 'source', ['title', 'description', 'specification', 'variant', 'image'] as const),
+      excerpt: str(raw, 'excerpt', 1000), ...(raw.sku ? { sku: str(raw, 'sku', 120) } : {}),
+      ...(raw.imageUrl ? { imageUrl: httpsOrEmpty(raw.imageUrl) } : {}) };
   });
 }
 

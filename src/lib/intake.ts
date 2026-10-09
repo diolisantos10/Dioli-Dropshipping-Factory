@@ -1,6 +1,6 @@
 export type CandidateStatus = 'CANDIDATO' | 'TRIADO' | 'INFORMACAO_SOLICITADA' | 'APROVADO' | 'REJEITADO' | 'ARQUIVADO';
 export type CandidateSource='MANUAL'|'TREND';
-export type SupplierFact = { field: string; value: number; unit: 'cm' | 'g'; source: 'title' | 'description' | 'specification' | 'variant'; sku?: string; excerpt: string };
+export type SupplierFact = { field: string; value: number; unit: 'cm' | 'g'; source: 'title' | 'description' | 'specification' | 'variant' | 'image'; sku?: string; excerpt: string; imageUrl?: string };
 export type CandidateVariant = { sku: string; label: string; price: number | null; stock: number | null; imageUrl?: string; attributes?: Record<string, string>; dimensions?: SupplierDetails['dimensions']; weightGrams?: number; facts?: SupplierFact[] };
 export type SupplierDetails = {
   description?: string; specifications?: Record<string, string>;
@@ -10,6 +10,7 @@ export type SupplierDetails = {
   shippingTime?: string; shippingCost?: number; sales?: number; rating?: number; reviewCount?: number;
   rawData?: Record<string, unknown>;
   importRevision?: number; facts?: SupplierFact[]; imageLabels?: string[];
+  vision?: { revision: number; processedImages: string[]; completed: boolean };
 };
 // Structured supplier data captured on import; older candidates only carry it inside `notes`.
 export type CandidateSupplier = SupplierDetails & { name: string; ref: string; cost: number | null; currency: string; stock: number | null; imageUrl: string; images: string[]; variants: CandidateVariant[] };

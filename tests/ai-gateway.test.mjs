@@ -39,8 +39,22 @@ test('rejeição por pareamento não vaza resposta nem segredo e não vira suces
   await assert.rejects(generateGatewayText(request),e=>e.code==='gateway_pairing_required'&&!e.message.includes(env.CONTROL_ROOM_SERVICE_TOKEN));
 });
 
-test('sem configuração falha antes da rede e referências visuais não são prometidas',()=>{
+test('sem configuração falha antes da rede; capacidades descrevem o contrato central implementado',()=>{
   assert.equal(gatewayConfigurationStatus().configured,false);
-  assert.equal(GATEWAY_CAPABILITIES.referenceImages,false);
-  assert.equal(GATEWAY_CAPABILITIES.vision,false);
+  assert.equal(GATEWAY_CAPABILITIES.referenceImages,true);
+  assert.equal(GATEWAY_CAPABILITIES.vision,true);
+});
+
+test('referências são encaminhadas ao gateway como visão, sem escolher provedor ou expor chave', async t => {
+  configure(t);
+  let sent;
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    sent = JSON.parse(init.body);
+    return Response.json({ ok: true, tier: 'primario', provedorId: 'openai', modeloId: 'configured-model', resultado: { sucesso: true, conteudo: '{"facts":[]}', proveniencia: {} } });
+  });
+  await generateGatewayText({ ...request, roleAddress: 'dioli.ddf.supplier-import', workClass: 'source_grounded_research', referenceImages: ['https://ae01.alicdn.com/size.jpg'] });
+  assert.equal(sent.modalidade, 'vision');
+  assert.deepEqual(sent.imagensReferencia, ['https://ae01.alicdn.com/size.jpg']);
+  assert.equal('model' in sent, false);
+  await assert.rejects(generateGatewayText({ ...request, referenceImages: ['https://user:secret@example.com/size.jpg'] }), error => error.code === 'gateway_invalid_request');
 });

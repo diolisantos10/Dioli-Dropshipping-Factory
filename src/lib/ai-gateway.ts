@@ -1,7 +1,7 @@
 // Server-only transport for the central Control Room. Supplier/provider keys never live in DDF.
 // Contract verified against control_room main: ai-runtime/interfaces/http.ts and adapters/tipos.ts.
 export const GATEWAY_CAPABILITIES = Object.freeze({
-  text: true, imageGeneration: true, referenceImages: false, imageEditing: false, vision: false,
+  text: true, imageGeneration: true, referenceImages: true, imageEditing: true, vision: true,
 });
 
 export class GatewayError extends Error {
@@ -24,6 +24,7 @@ export type GatewayTextRequest = {
   correlationId?: string;
   maxTokens?: number;
   workClass?: WorkClass;
+  referenceImages?: string[];
 };
 export type GatewayTextResult = {
   text: string;
@@ -73,6 +74,10 @@ export async function generateGatewayText(request: GatewayTextRequest): Promise<
     throw new GatewayError('gateway_invalid_request', 'Papel, referência e mensagens são obrigatórios e precisam ser válidos.');
   }
   const maxTokens = request.maxTokens ?? 4096;
+  const referenceImages = request.referenceImages ?? [];
+  if (referenceImages.length > 16 || referenceImages.some(raw => {
+    try { const url = new URL(raw); return url.protocol !== 'https:' || Boolean(url.username || url.password) || raw.length > 4096; } catch { return true; }
+  })) throw new GatewayError('gateway_invalid_request', 'A análise aceita até 16 referências HTTPS sem credenciais.');
   if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 32_000) throw new GatewayError('gateway_invalid_request', 'Limite de tokens inválido.');
   let response: Response;
   try {
@@ -81,12 +86,13 @@ export async function generateGatewayText(request: GatewayTextRequest): Promise<
       headers: { 'content-type': 'application/json', 'X-Service-Token': config.token },
       signal: AbortSignal.timeout(90_000),
       body: JSON.stringify({
-        roleAddress: request.roleAddress, workClass: request.workClass ?? 'technical_execution', modalidade: 'text',
+        roleAddress: request.roleAddress, workClass: request.workClass ?? 'technical_execution', modalidade: referenceImages.length ? 'vision' : 'text',
         centroCustoId: config.costCenterId,
         escopo: { holdingId: config.holdingId, productId: process.env.CONTROL_ROOM_PRODUCT_ID ?? 'ddf', roleAddress: request.roleAddress },
         ambiente: config.environment, payloadRef: request.payloadRef, classificacaoDados: 'internal', solicitadoPor: 'ddf-automation',
         correlacaoId: request.correlationId,
         mensagens: [{ role: 'system', content: request.system }, { role: 'user', content: request.prompt }], maxTokens,
+        ...(referenceImages.length ? { imagensReferencia: referenceImages } : {}),
       }),
     });
   } catch {

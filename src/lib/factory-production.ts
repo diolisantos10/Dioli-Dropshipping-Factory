@@ -10,15 +10,31 @@ import { getSupplierAdapterForIntegration } from './integrations';
 import { supplierCandidateInput } from './supplier-product';
 import { persistSupplierOriginals } from './supplier-media-archive';
 import { SUPPLIER_IMPORT_REVISION } from './providers/supplier-content.ts';
+import { readSupplierImages } from './providers/supplier-vision.ts';
 
 const IDENTITY = { role: 'SYSTEM', actor: 'system:factory-production' };
-export const studioCapabilityStatus = () => ({ available: false, code: 'gateway_reference_images_unsupported',
-  message: 'O gateway central atual não aceita fotos de referência, edição de imagem nem análise visual. A geração fiel das quatro fotos exige essas capacidades antes da ativação.' });
+export const studioCapabilityStatus = () => ({ available: false, code: 'studio_pipeline_pending',
+  message: 'A produção automática de estúdio ainda precisa concluir a geração e a conferência visual das quatro fotos antes da ativação.' });
+
+async function enrichCandidateImages(correlationId: string) {
+  if (!gatewayConfigurationStatus().configured) return { updated: 0, blocked: 'gateway_not_configured' };
+  const intake = ((await readState('intake'))?.payload ?? emptyIntake) as IntakeState;
+  const pending = intake.candidates.filter(candidate => candidate.supplier?.images.length && !candidate.supplier.vision?.completed && !['REJEITADO', 'ARQUIVADO'].includes(candidate.status));
+  const results: { candidateId: string; status: string }[] = [];
+  for (const candidate of pending.slice(0, 2)) {
+    try {
+      const supplier = await readSupplierImages(candidate.supplier!, `candidate:${candidate.id}:supplier:${candidate.supplier!.ref}`, generateGatewayText);
+      await runServerCommand('intake.refreshSupplier', { candidateId: candidate.id, supplier }, { ...IDENTITY, correlationId });
+      results.push({ candidateId: candidate.id, status: supplier.vision?.completed ? 'SUCCEEDED' : 'CONTINUING' });
+    } catch { results.push({ candidateId: candidate.id, status: 'FAILED' }); }
+  }
+  return { checked: results.length, remaining: pending.length, results };
+}
 
 export async function enrichRawCandidates(_actor: string, correlationId: string) {
   const intake = ((await readState('intake'))?.payload ?? emptyIntake) as IntakeState;
   const pending = intake.candidates.filter(candidate => candidate.supplier?.importRevision !== SUPPLIER_IMPORT_REVISION && /\/item\/(\d+)\.html/.test(candidate.url) && /(^|\.)aliexpress\.com$/.test(new URL(candidate.url).hostname));
-  if (!pending.length) return { checked: 0, updated: 0 };
+  if (!pending.length) return { checked: 0, updated: 0, vision: await enrichCandidateImages(correlationId) };
   const db = await getDatabasePool();
   const rows = (await db.query(`SELECT id FROM integration_configs WHERE provider_key='aliexpress' AND status IN ('TESTED','ACTIVE') ORDER BY status='ACTIVE' DESC,updated_at DESC LIMIT 1`)).rows;
   if (!rows[0]) return { blocked: pending.length, reason: 'Conecte e teste o AliExpress para completar as fichas antigas.' };
@@ -35,7 +51,7 @@ export async function enrichRawCandidates(_actor: string, correlationId: string)
       results.push({ candidateId: candidate.id, status: 'SUCCEEDED' });
     } catch { results.push({ candidateId: candidate.id, status: 'FAILED' }); }
   }
-  return { checked: results.length, updated, remaining: pending.length - updated, results };
+  return { checked: results.length, updated, remaining: pending.length - updated, results, vision: await enrichCandidateImages(correlationId) };
 }
 
 async function saveResult(candidateId: string, productId: string | null, status: string, stage: string, detail: Record<string, unknown>) {
