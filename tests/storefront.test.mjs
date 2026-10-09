@@ -42,20 +42,24 @@ test('filtros combinam busca, faixa de custo, fornecedor e estado', () => {
 });
 
 test('card de produto pronto usa mídia aprovada, menor oferta, preço aprovado e curadoria', () => {
-  const product = { id: 'p1', candidateId: 'c1', status: 'PRONTO', version: 2, universalTitle: 'Óculos', shortDescription: 'Leve', longDescription: '', category: 'Moda', bullets: [], benefits: [], tags: ['uv'], spec: { variants: [{ id: 'v1', sku: 'OC-1', title: 'Preto', gtin: '', attributes: { cor: 'preto' }, dimensions: {}, weightGrams: null }], destinationGaps: {} }, createdAt: 'now', updatedAt: 'now' };
+  const product = { id: 'p1', candidateId: 'c1', status: 'PRONTO', version: 2, universalTitle: 'Óculos', shortDescription: 'Leve', longDescription: 'Óculos em acetato com lentes azuis.', category: 'Moda', bullets: [], benefits: [], tags: ['uv'], spec: { materials: ['Acetato'], variants: [{ id: 'v1', sku: 'OC-1', title: 'Preto', gtin: '', attributes: { cor: 'preto' }, dimensions: { lengthCm: 15, widthCm: 14, heightCm: 5 }, weightGrams: 30 }], destinationGaps: {} }, createdAt: 'now', updatedAt: 'now' };
   let catalog = addSupplierOffer(emptyCatalog, { productId: 'p1', supplierName: 'Caro', supplierRef: 'X', cost: 30, currency: 'BRL', stock: 2, leadTimeDays: 5 }, 'o1', 'now');
   catalog = addSupplierOffer(catalog, { productId: 'p1', supplierName: 'Barato', supplierRef: 'Y', cost: 18, currency: 'BRL', stock: 3, leadTimeDays: 9 }, 'o2', 'now');
   catalog = curateProducts(catalog, ['p1'], 'APROVADO', 'Vitrine ok', 'dioli', 'now');
-  const media = [{ id: 'm1', productId: 'p1', url: 'https://cdn.test/foto.jpg', status: 'APROVADA', kind: 'ORIGINAL' }, { id: 'm2', productId: 'p1', url: 'https://cdn.test/video.mp4', mimeType: 'video/mp4', status: 'APROVADA', kind: 'ORIGINAL' }];
+  const media = [
+    { id: 'raw', productId: 'p1', url: 'https://cdn.test/original.jpg', status: 'APROVADA', kind: 'ORIGINAL' },
+    ...['front', 'back', 'left', 'right'].map((angle, index) => ({ id: `m${index}`, productId: 'p1', url: `https://cdn.test/${angle}.jpg`, mimeType: 'image/jpeg', status: 'APROVADA', kind: 'DERIVADA', studio: true, studioAngle: angle, originalAssetId: 'raw', sourceAssetIds: ['raw'], fidelityVerified: true, fidelityEvidence: 'Todos os detalhes conferidos', rightsStatus: 'DECLARADO' })),
+  ];
   const prices = [
     { id: 'x1', productId: 'p1', suggestedPrice: 59.9, currency: 'BRL', status: 'CALCULADO', approval: 'APROVADO', at: '2026-09-01' },
     { id: 'x2', productId: 'p1', suggestedPrice: 64.9, currency: 'BRL', status: 'CALCULADO', approval: 'PENDENTE', at: '2026-09-02' },
   ];
   const [record] = catalogRecords(catalog, [product], media, prices, []);
   const card = productCard(record, candidate('c1', { supplier: supplier(3) }), catalog.curation[0].status);
-  assert.equal(card.imageUrl, 'https://cdn.test/foto.jpg');
+  assert.equal(card.imageUrl, 'https://cdn.test/front.jpg');
   assert.ok(!card.images.includes('https://cdn.test/video.mp4'));
-  assert.ok(card.images.includes('https://ae01.alicdn.com/b.jpg'));
+  assert.ok(!card.images.includes('https://ae01.alicdn.com/b.jpg'));
+  assert.equal(card.images.length, 4);
   assert.equal(card.cost, 18); assert.equal(card.supplier, 'Barato'); assert.equal(card.stock, 5);
   assert.equal(card.suggestedPrice, 59.9);
   assert.equal(card.state, 'APROVADO');
@@ -73,4 +77,12 @@ test('curadoria em massa guarda só a última decisão por produto e exige justi
   assert.deepEqual(catalog.curation.map(item => `${item.productId}:${item.status}`).sort(), ['p1:ARQUIVADO', 'p2:APROVADO']);
   assert.throws(() => curateProducts(catalog, ['p1'], 'APROVADO', ' ', 'dioli', 't3'), /justificativa/);
   assert.throws(() => curateProducts(catalog, [], 'APROVADO', 'x', 'dioli', 't3'), /Selecione/);
+});
+
+test('ficha bruta separa descrição do fornecedor das observações e mantém detalhes completos', () => {
+  const source = { ...supplier(5), description: 'Descrição técnica original', specifications: { Material: 'Acetato' }, rawData: { custom: 'preservado' } };
+  const card = candidateCard(candidate('technical', { notes: 'Selecionar depois', supplier: source }));
+  assert.equal(card.description, 'Descrição técnica original');
+  assert.equal(card.sourceDetails.specifications.Material, 'Acetato');
+  assert.equal(card.sourceDetails.rawData.custom, 'preservado');
 });

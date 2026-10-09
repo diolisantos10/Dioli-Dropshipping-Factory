@@ -1,5 +1,5 @@
-import type { MediaAsset } from './media-factory';
-import type { MasterProduct, ProductEvent } from './product-factory';
+import { approvedStudioMedia, type MediaAsset } from './media-factory.ts';
+import { productGaps, type MasterProduct, type ProductEvent } from './product-factory.ts';
 import type { PriceCalculation } from './pricing';
 
 export type CatalogParty = { id: string; name: string; active: boolean };
@@ -22,7 +22,7 @@ export type CatalogRecord = {
 export const CATALOG_STORAGE_KEY = 'ddf.catalog.demo.v1';
 export const emptyCatalog: CatalogState = {
   version: 1,
-  brands: ['Santioh', 'Dilee', 'Dilix', 'Queise'].map(name => ({ id: name.toLocaleLowerCase(), name, active: true })),
+  brands: ['Santioh', 'Dilly', 'Dilix', 'Queise'].map(name => ({ id: name.toLocaleLowerCase(), name, active: true })),
   stores: [], offers: [], assignments: [],
 };
 
@@ -45,8 +45,15 @@ export function addSupplierOffer(state: CatalogState, input: Omit<SupplierOffer,
   if (state.offers.some(offer => offer.productId === input.productId && offer.supplierName.toLocaleLowerCase() === input.supplierName.toLocaleLowerCase() && offer.supplierRef === input.supplierRef)) throw new Error('Esta oferta de fornecedor já existe.');
   return { ...state, offers: [{ ...input, id, supplierName: input.supplierName.trim(), supplierRef: input.supplierRef.trim(), currency: input.currency.trim().toUpperCase(), updatedAt: at }, ...state.offers] };
 }
+export function catalogReadiness(product: MasterProduct, media: MediaAsset[]) {
+  const studio = approvedStudioMedia(media, product.id);
+  const gaps = productGaps(product);
+  if (product.status !== 'PRONTO') gaps.push('Produção ainda não concluída');
+  if (studio.length < 4) gaps.push(`Fotos de estúdio aprovadas: ${studio.length}/4`);
+  return { ready: gaps.length === 0, gaps, studio };
+}
 export function catalogRecords(state: CatalogState, products: MasterProduct[], media: MediaAsset[], prices: PriceCalculation[], events: ProductEvent[]): CatalogRecord[] {
-  return products.filter(product => product.status === 'PRONTO').map(product => {
+  return products.filter(product => catalogReadiness(product, media).ready).map(product => {
     const assignment = state.assignments.find(item => item.productId === product.id) ?? { productId: product.id, brandIds: [], storeIds: [], destinations: [], updatedAt: product.updatedAt };
     return { product, assignment, brands: state.brands.filter(item => assignment.brandIds.includes(item.id)), stores: state.stores.filter(item => assignment.storeIds.includes(item.id)), offers: state.offers.filter(item => item.productId === product.id), media: media.filter(item => item.productId === product.id), prices: prices.filter(item => item.productId === product.id), history: events.filter(item => item.productId === product.id), destinationGaps: product.spec?.destinationGaps ?? {} };
   });

@@ -26,7 +26,7 @@ test('brand book: nada de promessa não comprovada no topo (demonstração/dados
   const shell = readFileSync('src/components/app-shell.tsx', 'utf8');
   assert.doesNotMatch(shell, /Dados simulados|Demonstração|Sem operações externas/);
   assert.match(shell, /Inteligência em operação\./);
-  assert.match(shell, /Santioh · Dilee · Dilix · Queise/);
+  assert.match(shell, /Santioh · Dilly/);
 });
 
 test('regra do cofre: produto não cadastra chave de IA nem mostra opção OpenAI', () => {

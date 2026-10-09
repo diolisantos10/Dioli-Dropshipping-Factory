@@ -2,13 +2,13 @@
 // server, against the persisted state: the browser only sends intent (type + input) and never a
 // computed payload. Identity, timestamps and IDs come from the server context, and cross-module
 // rules (approved candidate, approved media, READY product, approver role) are enforced here.
-import { addCandidate, bulkTransitionCandidates, emptyIntake, transitionCandidate, type CandidateSource, type CandidateStatus, type CandidateSupplier, type IntakeState } from './intake.ts';
+import { addCandidate, bulkTransitionCandidates, refreshCandidateSupplier, emptyIntake, transitionCandidate, type CandidateSource, type CandidateStatus, type CandidateSupplier, type IntakeState } from './intake.ts';
 import { emptyProductFactory, markProductReady, restoreProductVersion, setProductAvailability, startProduct, updateProduct, updateProductFiscal, type ProductFactoryState, type UniversalProductSpec } from './product-factory.ts';
 import type { Availability, ProductFiscal, VariantLogistics } from './product-fiscal.ts';
-import { addMedia, completeTransformation, emptyMedia, enqueueTransformation, hasApprovedMedia, reviewMedia, updateTransformationJob, type MediaAsset, type MediaState, type TransformationJob } from './media-factory.ts';
+import { addMedia, completeTransformation, emptyMedia, enqueueTransformation, ingestSupplierOriginals, studioReadiness, reviewMedia, updateTransformationJob, type MediaAsset, type MediaState, type TransformationJob } from './media-factory.ts';
 import { approvePrice, calculatePrice, emptyPricing, recalculateSupplierCost, releaseQuarantine, type PricingInput, type PricingState } from './pricing.ts';
 import { advanceOrder, emptyOrders, flagOrderException, purgeExpiredOrderData, receiveOrder, resolveOrderException, type ExceptionCategory, type ExceptionResolution, type OrderState, type OrderStatus } from './orders.ts';
-import { addSupplierOffer, assignProduct, curateProducts, emptyCatalog, refreshSupplierOffer, upsertParty, type CatalogState } from './catalog.ts';
+import { addSupplierOffer, assignProduct, catalogReadiness, curateProducts, emptyCatalog, refreshSupplierOffer, upsertParty, type CatalogState } from './catalog.ts';
 
 export type CommandNamespace = 'intake' | 'products' | 'media' | 'pricing' | 'orders' | 'catalog';
 export type CommandRole = 'ADMIN' | 'APPROVER' | 'OPERATOR' | 'SYSTEM';
@@ -59,8 +59,11 @@ function readyProduct(states: CommandStates, productId: string) {
   const product = states.products.products.find((item) => item.id === productId);
   if (!product) throw new CommandError('Produto mestre não encontrado.', 404);
   if (product.status !== 'PRONTO') throw new CommandError('Somente produtos PRONTOS podem seguir para preço, catálogo e pedidos.');
+  const readiness = catalogReadiness(product, sMedia(states));
+  if (!readiness.ready) throw new CommandError(`Produto ainda incompleto: ${readiness.gaps.join(', ')}.`);
   return product;
 }
+function sMedia(states: CommandStates) { return states.media.assets; }
 function productInProduction(states: CommandStates, productId: string) {
   const product = states.products.products.find((item) => item.id === productId);
   if (!product) throw new CommandError('Produto mestre não encontrado.', 404);
@@ -91,7 +94,7 @@ function mediaAssetInput(raw: Input): Omit<MediaAsset, 'id' | 'status' | 'create
   };
 }
 
-const BULK_STATUSES = ['APROVADO', 'REJEITADO', 'ARQUIVADO'] as const;
+const BULK_STATUSES = ['TRIADO', 'APROVADO', 'REJEITADO', 'ARQUIVADO'] as const;
 const BULK_MAX = 200;
 function ids(input: Input, key: string): string[] {
   const value = strings(input, key, BULK_MAX);
@@ -100,17 +103,36 @@ function ids(input: Input, key: string): string[] {
 }
 const finiteOrNull = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 const httpsOrEmpty = (value: unknown) => typeof value === 'string' && /^https:\/\/[^\s]{1,2040}$/.test(value) ? value : '';
+function stringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => typeof item === 'string').map(([key, item]) => [key, String(item)]));
+}
+function supplierDimensions(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const raw = value as Input;
+  return Object.fromEntries(['lengthCm', 'widthCm', 'heightCm'].flatMap(key => finiteOrNull(raw[key]) === null ? [] : [[key, finiteOrNull(raw[key])]]));
+}
 function supplierInput(input: Input): CandidateSupplier | undefined {
   if (input.supplier === undefined || input.supplier === null) return undefined;
   const raw = obj(input, 'supplier');
-  const images = Array.isArray(raw.images) ? raw.images.map(httpsOrEmpty).filter(Boolean).slice(0, 20) : [];
-  const variants = (Array.isArray(raw.variants) ? raw.variants : []).slice(0, 50).map((value) => {
+  if (JSON.stringify(raw).length > 2_000_000) throw new CommandError('Dados do fornecedor excedem 2 MB. Nenhum dado foi truncado; revise a origem.');
+  const images = Array.isArray(raw.images) ? raw.images.map(httpsOrEmpty).filter(Boolean) : [];
+  const variants = (Array.isArray(raw.variants) ? raw.variants : []).map((value) => {
     const item = (value && typeof value === 'object' ? value : {}) as Input;
-    return { sku: String(item.sku ?? '').slice(0, 120), label: String(item.label ?? '').slice(0, 300), price: finiteOrNull(item.price), stock: finiteOrNull(item.stock), imageUrl: httpsOrEmpty(item.imageUrl) };
+    return { sku: String(item.sku ?? '').slice(0, 120), label: String(item.label ?? '').slice(0, 300), price: finiteOrNull(item.price), stock: finiteOrNull(item.stock), imageUrl: httpsOrEmpty(item.imageUrl), attributes: stringRecord(item.attributes) };
   });
   return {
     name: str(raw, 'name', 160), ref: str(raw, 'ref', 160), cost: finiteOrNull(raw.cost), currency: (str(raw, 'currency', 3, false) || 'BRL').toUpperCase(),
     stock: finiteOrNull(raw.stock), imageUrl: httpsOrEmpty(raw.imageUrl) || images[0] || '', images, variants,
+    description: typeof raw.description === 'string' ? raw.description : undefined,
+    specifications: stringRecord(raw.specifications), dimensions: supplierDimensions(raw.dimensions), packageDimensions: supplierDimensions(raw.packageDimensions),
+    weightGrams: finiteOrNull(raw.weightGrams) ?? undefined, packageWeightGrams: finiteOrNull(raw.packageWeightGrams) ?? undefined,
+    materials: Array.isArray(raw.materials) ? raw.materials.filter((item): item is string => typeof item === 'string') : [],
+    features: Array.isArray(raw.features) ? raw.features.filter((item): item is string => typeof item === 'string') : [],
+    shippingTime: typeof raw.shippingTime === 'string' ? raw.shippingTime : undefined,
+    shippingCost: finiteOrNull(raw.shippingCost) ?? undefined, sales: finiteOrNull(raw.sales) ?? undefined,
+    rating: finiteOrNull(raw.rating) ?? undefined, reviewCount: finiteOrNull(raw.reviewCount) ?? undefined,
+    rawData: raw.rawData && typeof raw.rawData === 'object' && !Array.isArray(raw.rawData) ? structuredClone(raw.rawData) as Record<string, unknown> : undefined,
   };
 }
 
@@ -120,6 +142,11 @@ export const COMMANDS: Record<string, Handler> = {
     name: str(i, 'name', 640), fullName: str(i, 'fullName', 2000, false) || undefined, supplier: supplierInput(i), url: str(i, 'url', 2048), notes: str(i, 'notes', 2000, false),
     source: (i.source === 'TREND' ? 'TREND' : 'MANUAL') as CandidateSource, region: str(i, 'region', 120, false), category: str(i, 'category', 120, false), evidence: strings(i, 'evidence', 50),
   }, c.newId(), c.at, c.actor) },
+  'intake.refreshSupplier': { writes: 'intake', reads: [], roles: always(['ADMIN', 'SYSTEM']), run: (s, i, c) => {
+    const supplier = supplierInput(i);
+    if (!supplier) throw new CommandError('Dados do fornecedor obrigatórios.');
+    return refreshCandidateSupplier(s.intake, str(i, 'candidateId', 80), supplier, c.newId(), c.at, c.actor);
+  } },
   'intake.transition': {
     writes: 'intake', reads: [],
     // Portfolio gate: approving or rejecting a candidate is an approver decision.
@@ -132,12 +159,12 @@ export const COMMANDS: Record<string, Handler> = {
     roles: (i) => ['APROVADO', 'REJEITADO'].includes(String(i.status)) ? APPROVE : OPERATE,
     run: (s, i, c) => bulkTransitionCandidates(s.intake, ids(i, 'candidateIds'), oneOf(i, 'status', BULK_STATUSES), str(i, 'reason', 2000), c.newId, c.at, c.actor).state,
   },
-  'products.start': { writes: 'products', reads: ['intake'], roles: always(OPERATE), run: (s, i, c) => {
+  'products.start': { writes: 'products', reads: ['intake'], roles: always([...OPERATE, 'SYSTEM']), run: (s, i, c) => {
     const candidate = s.intake.candidates.find((item) => item.id === str(i, 'candidateId', 80));
     if (!candidate) throw new CommandError('Candidato não encontrado.', 404);
     return startProduct(s.products, candidate, c.newId(), c.at, c.actor);
   } },
-  'products.update': { writes: 'products', reads: [], roles: always(OPERATE), run: (s, i, c) => updateProduct(s.products, str(i, 'productId', 80), {
+  'products.update': { writes: 'products', reads: [], roles: always([...OPERATE, 'SYSTEM']), run: (s, i, c) => updateProduct(s.products, str(i, 'productId', 80), {
     universalTitle: str(i, 'universalTitle', 300), category: str(i, 'category', 200, false), shortDescription: str(i, 'shortDescription', 1000, false),
     longDescription: str(i, 'longDescription', 20000, false), bullets: strings(i, 'bullets', 20), benefits: strings(i, 'benefits', 20), tags: strings(i, 'tags', 50),
     spec: i.spec === undefined ? undefined : obj(i, 'spec') as unknown as UniversalProductSpec,
@@ -151,9 +178,23 @@ export const COMMANDS: Record<string, Handler> = {
   'products.setAvailability': { writes: 'products', reads: [], roles: always(OPERATE), run: (s, i, c) => setProductAvailability(s.products, str(i, 'productId', 80), oneOf(i, 'availability', ['PRONTA_ENTREGA', 'SOB_ENCOMENDA'] as const) as Availability, c.at, c.actor) },
   'products.restoreVersion': { writes: 'products', reads: [], roles: always(OPERATE), run: (s, i, c) => restoreProductVersion(s.products, str(i, 'productId', 80), num(i, 'version'), c.at, c.actor) },
   // Approved media is read from the persisted Media Factory, never trusted from the browser.
-  'products.markReady': { writes: 'products', reads: ['media'], roles: always(APPROVE), run: (s, i, c) => {
+  'products.markReady': { writes: 'products', reads: ['media'], roles: always([...APPROVE, 'SYSTEM']), run: (s, i, c) => {
     const productId = str(i, 'productId', 80);
-    return markProductReady(s.products, productId, c.at, hasApprovedMedia(s.media, productId), c.actor);
+    return markProductReady(s.products, productId, c.at, studioReadiness(s.media, productId).approvedCount, c.actor);
+  } },
+  'media.archiveSupplierOriginals': { writes: 'media', reads: ['products', 'intake'], roles: always(['ADMIN', 'SYSTEM']), run: (s, i, c) => {
+    const product = productInProduction(s, str(i, 'productId', 80));
+    const candidate = s.intake.candidates.find(item => item.id === product.candidateId);
+    const images = [...(candidate?.supplier?.images ?? []), candidate?.supplier?.imageUrl ?? '', ...(product.spec?.sourceImages ?? [])].filter(Boolean);
+    return ingestSupplierOriginals(s.media, product.id, images, candidate?.url ?? product.spec?.sourceUrl ?? 'Fornecedor', c.at);
+  } },
+  'media.persistOriginal': { writes: 'media', reads: [], roles: always(['SYSTEM']), run: (s, i) => {
+    const assetId = str(i, 'assetId', 80);
+    const asset = s.media.assets.find(item => item.id === assetId && item.kind === 'ORIGINAL');
+    if (!asset) throw new CommandError('Original não encontrado.', 404);
+    const url = new URL(str(i, 'url', 2000));
+    if (!process.env.DDF_PUBLIC_URL || url.origin !== new URL(process.env.DDF_PUBLIC_URL).origin || url.pathname !== '/api/media' || !/^[a-f0-9-]{36}$/i.test(url.searchParams.get('id') ?? '')) throw new CommandError('Arquivo interno inválido.');
+    return { ...s.media, assets: s.media.assets.map(item => item.id === assetId ? { ...item, sourceUrl: item.sourceUrl ?? item.url, url: url.href, checksum: str(i, 'checksum', 64), mimeType: str(i, 'mimeType', 80), bytes: num(i, 'bytes') } : item) };
   } },
   'media.addAsset': { writes: 'media', reads: ['products'], roles: always(OPERATE), run: (s, i, c) => {
     const asset = mediaAssetInput(obj(i, 'asset'));
@@ -179,7 +220,7 @@ export const COMMANDS: Record<string, Handler> = {
       changesProductAppearance: derived.changesProductAppearance === true,
     }, c.newId(), c.at);
   } },
-  'pricing.calculate': { writes: 'pricing', reads: ['products'], roles: always(OPERATE), run: (s, i, c) => {
+  'pricing.calculate': { writes: 'pricing', reads: ['products', 'media'], roles: always(OPERATE), run: (s, i, c) => {
     const raw = obj(i, 'input');
     const input: PricingInput = {
       productId: str(raw, 'productId', 80), currency: str(raw, 'currency', 3).toUpperCase(), country: str(raw, 'country', 40, false) || undefined,
@@ -195,7 +236,7 @@ export const COMMANDS: Record<string, Handler> = {
   'pricing.approve': { writes: 'pricing', reads: [], roles: always(APPROVE), run: (s, i, c) => approvePrice(s.pricing, str(i, 'calculationId', 80), c.actor, c.at) },
   'pricing.recalculateSupplierCost': { writes: 'pricing', reads: [], roles: always(['ADMIN', 'SYSTEM']), run: (s, i, c) => recalculateSupplierCost(s.pricing, str(i, 'calculationId', 80), num(i, 'supplierCost'), c.newId(), c.at) },
   'pricing.releaseQuarantine': { writes: 'pricing', reads: [], roles: always(APPROVE), run: (s, i, c) => releaseQuarantine(s.pricing, str(i, 'calculationId', 80), c.actor, str(i, 'reason', 1000)) },
-  'orders.receive': { writes: 'orders', reads: ['products'], roles: always([...OPERATE, 'SYSTEM']), run: (s, i, c) => {
+  'orders.receive': { writes: 'orders', reads: ['products', 'media'], roles: always([...OPERATE, 'SYSTEM']), run: (s, i, c) => {
     const productId = str(i, 'productId', 80);
     readyProduct(s, productId);
     return receiveOrder(s.orders, { externalOrderId: str(i, 'externalOrderId', 160), productId, salePrice: num(i, 'salePrice'), costSnapshot: num(i, 'costSnapshot'), currency: (str(i, 'currency', 3, false) || 'BRL').toUpperCase(), customerRef: str(i, 'customerRef', 100, false) }, c.newId(), c.at);
@@ -210,20 +251,20 @@ export const COMMANDS: Record<string, Handler> = {
   },
   'orders.purgeExpired': { writes: 'orders', reads: [], roles: always(['ADMIN', 'SYSTEM']), run: (s, _i, c) => purgeExpiredOrderData(s.orders, c.at) },
   'catalog.upsertParty': { writes: 'catalog', reads: [], roles: always(APPROVE), run: (s, i) => upsertParty(s.catalog, oneOf(i, 'kind', ['brand', 'store'] as const), { id: str(i, 'id', 80), name: str(i, 'name', 160), active: i.active !== false }) },
-  'catalog.assignProduct': { writes: 'catalog', reads: ['products'], roles: always(APPROVE), run: (s, i, c) => {
+  'catalog.assignProduct': { writes: 'catalog', reads: ['products', 'media'], roles: always(APPROVE), run: (s, i, c) => {
     const productId = str(i, 'productId', 80);
     readyProduct(s, productId);
     return assignProduct(s.catalog, productId, { brandIds: strings(i, 'brandIds'), storeIds: strings(i, 'storeIds'), destinations: strings(i, 'destinations') }, c.at);
   } },
-  'catalog.addOffer': { writes: 'catalog', reads: ['products'], roles: always(OPERATE), run: (s, i, c) => {
+  'catalog.addOffer': { writes: 'catalog', reads: ['products', 'media'], roles: always([...OPERATE, 'SYSTEM']), run: (s, i, c) => {
     const productId = str(i, 'productId', 80);
     readyProduct(s, productId);
     return addSupplierOffer(s.catalog, { productId, supplierRef: str(i, 'supplierRef', 160), supplierName: str(i, 'supplierName', 160), cost: num(i, 'cost'), currency: str(i, 'currency', 3), stock: nullableInt(i, 'stock'), leadTimeDays: nullableInt(i, 'leadTimeDays') }, c.newId(), c.at);
   } },
-  'catalog.bulkCurate': { writes: 'catalog', reads: ['products'], roles: always(APPROVE), run: (s, i, c) => {
+  'catalog.bulkCurate': { writes: 'catalog', reads: ['products', 'media'], roles: always(APPROVE), run: (s, i, c) => {
     const productIds = ids(i, 'productIds');
     productIds.forEach((productId) => readyProduct(s, productId));
-    return curateProducts(s.catalog, productIds, oneOf(i, 'status', BULK_STATUSES), str(i, 'reason', 2000), c.actor, c.at);
+    return curateProducts(s.catalog, productIds, oneOf(i, 'status', ['APROVADO', 'REJEITADO', 'ARQUIVADO'] as const), str(i, 'reason', 2000), c.actor, c.at);
   } },
   'catalog.refreshOffer': { writes: 'catalog', reads: [], roles: always(['ADMIN', 'SYSTEM']), run: (s, i, c) => refreshSupplierOffer(s.catalog, str(i, 'offerId', 80), { cost: num(i, 'cost'), currency: str(i, 'currency', 3), stock: nullableInt(i, 'stock'), leadTimeDays: nullableInt(i, 'leadTimeDays') }, c.at) },
 };

@@ -84,14 +84,14 @@ export function Storefront({ cards, stateOptions, defaultState = '', bulkActions
 
     {!loading && visible.length === 0 && <div className="surface p-8 text-center"><h2 className="text-lg font-semibold">Nenhum produto nesta vitrine</h2><p className="mt-2 text-[var(--muted)]">{emptyText}</p></div>}
 
-    <ul className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5" aria-label="Produtos">
+    <ul className="grid grid-cols-2 gap-3 sm:gap-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6" aria-label="Produtos">
       {shown.map(card => <li key={card.id} className={`surface group relative flex flex-col overflow-hidden transition-shadow hover:shadow-lg ${selected.has(card.id) ? 'ring-2 ring-[var(--ink)] ring-offset-2 ring-offset-[var(--accent)]' : ''}`}>
         <label className="absolute left-2 top-2 z-10 grid h-10 w-10 cursor-pointer place-items-center rounded-full bg-white/90 shadow" title="Selecionar">
           <input type="checkbox" className="h-5 w-5 accent-[var(--accent)]" checked={selected.has(card.id)} onChange={() => toggle(card.id)} aria-label={`Selecionar ${card.title}`} />
         </label>
         <button type="button" className="flex flex-1 flex-col text-left" onClick={() => setOpenId(card.id)} aria-label={`Abrir detalhes de ${card.title}`}>
-          <div className="relative aspect-square w-full overflow-hidden bg-stone-100">
-            {card.imageUrl ? <img src={card.imageUrl} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+          <div className="relative aspect-[5/4] w-full overflow-hidden bg-stone-100">
+            {card.imageUrl ? <img src={card.imageUrl} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" className="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105" />
               : <div className="grid h-full w-full place-items-center text-xs text-[var(--muted)]">Sem foto</div>}
             <span className={`absolute bottom-2 left-2 max-w-[65%] truncate rounded-full px-2 py-1 text-[11px] font-semibold ${stateTone[card.state] ?? 'bg-white/90 text-stone-800'}`}>{card.stateLabel}</span>
             {showAvailability && card.availability && <span className={`absolute right-2 top-2 rounded-full px-2 py-1 text-[11px] font-bold ${card.availability === 'PRONTA_ENTREGA' ? 'bg-[var(--accent)] text-[var(--accent-ink)]' : 'bg-[var(--ink)] text-[var(--brand-branco)]'}`}>{availabilityLabels[card.availability]}</span>}
@@ -163,7 +163,8 @@ function ProductDetail({ card, onClose, children }: { card: StoreCard; onClose: 
             {card.fiscalCompletion !== undefined && <Info label="Cadastro fiscal" value={`${card.fiscalCompletion}% preenchido`} />}
           </dl>
           {card.url && <a className="inline-block break-all text-sm underline" href={card.url} target="_blank" rel="noreferrer noopener">Abrir página de origem</a>}
-          {card.description && <p className="whitespace-pre-wrap text-sm text-[var(--muted)]">{card.description}</p>}
+          <section><h3 className="font-semibold">Descrição do produto</h3><p className="mt-2 whitespace-pre-wrap text-sm text-[var(--muted)]">{card.description || 'Não informada pelo fornecedor.'}</p></section>
+          {card.sourceDetails && <SupplierInformation supplier={card.sourceDetails} />}
           <section>
             <h3 className="font-semibold">Variantes ({card.variants.length})</h3>
             {card.variants.length ? <ul className="mt-2 divide-y divide-[var(--line)] rounded-lg border border-[var(--line)]">
@@ -183,4 +184,29 @@ function ProductDetail({ card, onClose, children }: { card: StoreCard; onClose: 
 
 function Info({ label, value }: { label: string; value: string }) {
   return <div className="rounded-lg bg-[var(--canvas)] p-3"><dt className="text-xs text-[var(--muted)]">{label}</dt><dd className="mt-1 font-semibold">{value}</dd></div>;
+}
+
+function SupplierInformation({ supplier }: { supplier: NonNullable<StoreCard['sourceDetails']> }) {
+  const missing = 'Não informado pelo fornecedor';
+  const dimensions = (value: typeof supplier.dimensions) => value && Object.values(value).some(item => item !== undefined)
+    ? [value.lengthCm, value.widthCm, value.heightCm].map(item => item === undefined ? '?' : item.toLocaleString('pt-BR')).join(' × ') + ' cm (C × L × A)' : missing;
+  return <section className="space-y-3">
+    <h3 className="font-semibold">Dados brutos do fornecedor</h3>
+    <dl className="grid grid-cols-2 gap-3 text-sm">
+      <Info label="Dimensões do produto" value={dimensions(supplier.dimensions)} />
+      <Info label="Peso do produto" value={supplier.weightGrams === undefined ? missing : `${supplier.weightGrams.toLocaleString('pt-BR')} g`} />
+      <Info label="Dimensões da embalagem" value={dimensions(supplier.packageDimensions)} />
+      <Info label="Peso com embalagem" value={supplier.packageWeightGrams === undefined ? missing : `${supplier.packageWeightGrams.toLocaleString('pt-BR')} g`} />
+      <Info label="Materiais" value={supplier.materials?.join(' · ') || missing} />
+      <Info label="Características" value={supplier.features?.join(' · ') || missing} />
+      <Info label="Prazo de entrega" value={supplier.shippingTime || missing} />
+      <Info label="Frete" value={supplier.shippingCost === undefined ? missing : formatMoney(supplier.shippingCost, supplier.currency)} />
+      <Info label="Vendas" value={supplier.sales === undefined ? missing : supplier.sales.toLocaleString('pt-BR')} />
+      <Info label="Avaliação" value={supplier.rating === undefined ? missing : String(supplier.rating)} />
+      <Info label="Número de avaliações" value={supplier.reviewCount === undefined ? missing : supplier.reviewCount.toLocaleString('pt-BR')} />
+    </dl>
+    <h4 className="text-sm font-semibold">Especificações técnicas originais</h4>
+    {Object.keys(supplier.specifications ?? {}).length ? <dl className="grid gap-2 sm:grid-cols-2">{Object.entries(supplier.specifications ?? {}).map(([key, value]) => <Info key={key} label={key} value={value} />)}</dl> : <p className="text-sm text-[var(--muted)]">{missing}</p>}
+    {supplier.rawData && <details className="text-sm"><summary className="cursor-pointer font-semibold">Ver todos os dados originais recebidos do AliExpress</summary><pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded bg-[var(--canvas)] p-3 text-xs">{JSON.stringify(supplier.rawData, null, 2)}</pre></details>}
+  </section>;
 }

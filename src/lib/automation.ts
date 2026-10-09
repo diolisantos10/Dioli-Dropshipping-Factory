@@ -5,10 +5,12 @@ import { drainOutbox, getDatabasePool, readState } from './server-state';
 import { emptyCatalog, type CatalogState } from './catalog';
 import { emptyOrders, purgeExpiredOrderData, type OrderState } from './orders';
 import { emptyPricing, latestCalculations, type PricingState } from './pricing';
+import { enrichRawCandidates, runFactoryProduction } from './factory-production';
+import { runBrandDiscovery } from './brand-discovery';
 
-export type AutomationTask = 'outbox' | 'credentials' | 'supplierOffers' | 'priceRecalculation' | 'channelOrders' | 'retention';
-export const automationTasks: AutomationTask[] = ['credentials', 'outbox', 'supplierOffers', 'priceRecalculation', 'channelOrders', 'retention'];
-type TaskResult = { task: AutomationTask; status: 'SUCCEEDED' | 'FAILED'; durationMs: number; detail: Record<string, unknown>; error?: string };
+export type AutomationTask = 'outbox' | 'credentials' | 'supplierOffers' | 'priceRecalculation' | 'channelOrders' | 'retention' | 'brandDiscovery' | 'factoryProduction' | 'rawEnrichment';
+export const automationTasks: AutomationTask[] = ['credentials', 'outbox', 'rawEnrichment', 'brandDiscovery', 'factoryProduction', 'supplierOffers', 'priceRecalculation', 'channelOrders', 'retention'];
+type TaskResult = { task: AutomationTask; status: 'SUCCEEDED' | 'FAILED' | 'BLOCKED'; durationMs: number; detail: Record<string, unknown>; error?: string };
 const SYSTEM = { role: 'SYSTEM' as const };
 const MAX_OFFERS_PER_RUN = 25;
 const ORDER_LOOKBACK_DAYS = 3;
@@ -122,6 +124,9 @@ async function applyRetention(actor: string, correlationId: string) {
 }
 
 const handlers: Record<AutomationTask, (actor: string, correlationId: string) => Promise<Record<string, unknown>>> = {
+  rawEnrichment: enrichRawCandidates,
+  brandDiscovery: runBrandDiscovery,
+  factoryProduction: runFactoryProduction,
   credentials: (actor) => refreshExpiringCredentials(actor),
   outbox: async () => drainOutbox(100),
   supplierOffers: syncSupplierOffers,
@@ -141,10 +146,16 @@ export async function runAutomation(trigger: string, actor: string, tasks: Autom
   const results: TaskResult[] = [];
   for (const task of tasks) {
     const started = Date.now();
-    try { results.push({ task, status: 'SUCCEEDED', durationMs: Date.now() - started, detail: await handlers[task](actor, correlationId) }); }
+    try {
+      const detail = await handlers[task](actor, correlationId);
+      const children = Array.isArray(detail.results) ? detail.results as {status?:string}[] : [];
+      const blocked = Number(detail.blocked ?? 0) > 0 || children.some(item => item.status === 'BLOCKED');
+      const failures = Number(detail.failed ?? 0) > 0 || children.some(item => item.status === 'FAILED');
+      results.push({ task, status: failures ? 'FAILED' : blocked ? 'BLOCKED' : 'SUCCEEDED', durationMs: Date.now() - started, detail });
+    }
     catch (error) { results.push({ task, status: 'FAILED', durationMs: Date.now() - started, detail: {}, error: error instanceof Error ? error.message.slice(0, 500) : 'falha desconhecida' }); }
   }
-  const failed = results.filter((item) => item.status === 'FAILED').length;
+  const failed = results.filter((item) => item.status !== 'SUCCEEDED').length;
   const status = failed === 0 ? 'SUCCEEDED' : failed === results.length ? 'FAILED' : 'PARTIAL';
   await db.query(`UPDATE automation_runs SET status=$2,finished_at=now(),results=$3 WHERE id=$1`, [id, status, JSON.stringify(results)]);
   await db.query(`INSERT INTO audit_events(id,actor,action,entity_type,entity_id,correlation_id,metadata) VALUES($1,$2,'AUTOMATION_RUN','AUTOMATION_RUN',$3,$4,$5)`, [randomUUID(), actor, id, correlationId, JSON.stringify({ trigger, status, results })]);

@@ -5,12 +5,12 @@ import { navigationGroups } from "@/lib/factory-navigation";
 export const metadata = { title: "Mapa da Factory" };
 
 const flow = [
-  { title: "Descobrir", detail: "Prateleira Bruta" },
-  { title: "Decidir", detail: "Sala de Triagem" },
-  { title: "Produzir", detail: "Produto + Mídia" },
-  { title: "Precificar", detail: "Pricing & Margem" },
-  { title: "Operar", detail: "Catálogo + Pedidos" },
-  { title: "Aprender", detail: "Inteligência + Auditoria" },
+  { title: "Descobrir", detail: "IA → Prateleira Bruta" },
+  { title: "Reservar e decidir", detail: "Sua seleção → Sala de Triagem" },
+  { title: "Produzir", detail: "Sua autorização → Produto + Mídia" },
+  { title: "Concluir a esteira", detail: "Produtos Disponíveis" },
+  { title: "Distribuir", detail: "Sua seleção de loja → Pricing" },
+  { title: "Operar e aprender", detail: "Pedidos + Inteligência + Auditoria" },
 ];
 
 export default function FactoryMapPage() {
@@ -23,7 +23,7 @@ export default function FactoryMapPage() {
       </header>
 
       <section className="surface p-6">
-        <div className="section-heading"><div><h2>Fluxo principal</h2><p>A sequência normal de trabalho, do sinal inicial ao aprendizado.</p></div></div>
+        <div className="section-heading"><div><h2>Fluxo principal</h2><p>A esteira termina em Produtos Disponíveis. A distribuição começa com sua escolha manual de produto e loja.</p></div></div>
         <ol className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
           {flow.map((step, index) => (
             <li key={step.title} className="relative rounded-lg border border-[var(--line)] bg-[var(--surface-strong)] p-4">

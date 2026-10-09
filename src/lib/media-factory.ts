@@ -7,11 +7,13 @@ export type TransformationKind = 'REDIMENSIONAR' | 'REENQUADRAR' | 'CONVERTER' |
 export type TransformationJobStatus = 'PENDENTE' | 'PROCESSANDO' | 'CONCLUIDO' | 'FALHOU' | 'BLOQUEADO';
 
 export type MediaAsset = {
-  id: string; productId: string; url: string; kind: MediaKind; purpose: string; provenance: string;
+  id: string; productId: string; url: string; sourceUrl?: string; kind: MediaKind; purpose: string; provenance: string;
   status: MediaStatus; createdAt: string; checksum?: string; mimeType?: string; bytes?: number;
   version?: number; originalAssetId?: string; destination?: string; format?: MediaFormat;
   aspectRatio?: MediaAspectRatio; rightsStatus?: RightsStatus; rightsHolder?: string;
   rightsExpiresAt?: string; transformationNotes?: string; changesProductAppearance?: boolean;
+  studio?: boolean; studioAngle?: string; sourceAssetIds?: string[]; fidelityVerified?: boolean;
+  fidelityEvidence?: string; generationProvider?: string; generationId?: string;
 };
 export type TransformationJob = {
   id: string; productId: string; sourceAssetId: string; kind: TransformationKind; destination: string;
@@ -51,6 +53,7 @@ export function reviewMedia(state: MediaState, id: string, status: 'APROVADA'|'R
   if (status === 'APROVADA') {
     if ((asset.rightsStatus ?? 'DESCONHECIDO') === 'DESCONHECIDO' || asset.rightsStatus === 'EXPIRADO') throw new Error('Não é possível aprovar mídia sem direitos de uso válidos.');
     if (asset.changesProductAppearance) throw new Error('Derivada bloqueada: a transformação pode alterar de forma enganosa a aparência do produto.');
+    if (asset.studio && (!asset.fidelityVerified || !asset.fidelityEvidence?.trim() || !asset.studioAngle?.trim())) throw new Error('Foto de estúdio exige ângulo e verificação de fidelidade documentada.');
     if (asset.kind === 'DERIVADA') {
       const original = state.assets.find(item => item.id === asset.originalAssetId);
       if (!original || original.status !== 'APROVADA') throw new Error('A mídia original precisa estar aprovada antes da derivada.');
@@ -85,3 +88,42 @@ export function completeTransformation(state: MediaState, jobId: string, derived
 }
 
 export const hasApprovedMedia = (state: MediaState, productId: string) => state.assets.some(a => a.productId === productId && a.status === 'APROVADA');
+
+/** Originals remain archived; only faithful, distinct studio views enter the commercial catalog. */
+export function approvedStudioMedia(assets: MediaAsset[], productId: string): MediaAsset[] {
+  const urls = new Set<string>(); const angles = new Set<string>();
+  return assets.filter(asset => {
+    if (asset.productId !== productId || asset.kind !== 'DERIVADA' || !asset.studio || asset.status !== 'APROVADA' ||
+      !asset.fidelityVerified || !asset.fidelityEvidence?.trim() || asset.changesProductAppearance || !asset.studioAngle?.trim() ||
+      (asset.mimeType ?? '').startsWith('video/')) return false;
+    const references = asset.sourceAssetIds?.length ? asset.sourceAssetIds : [asset.originalAssetId];
+    if (!references.every(id => assets.some(original => original.id === id && original.productId === productId && original.kind === 'ORIGINAL' && original.status === 'APROVADA')) || !references.length) return false;
+    if (assets.some(original => original.kind === 'ORIGINAL' && original.url === asset.url)) return false;
+    const angle = asset.studioAngle.trim().toLowerCase();
+    if (urls.has(asset.url) || angles.has(angle)) return false;
+    urls.add(asset.url); angles.add(angle); return true;
+  });
+}
+export const approvedStudioAssets = (state: MediaState, productId: string) => approvedStudioMedia(state.assets, productId);
+export function studioReadiness(state: MediaState, productId: string, requiredCount = 4) {
+  const assets = approvedStudioAssets(state, productId);
+  const minimum = Math.max(4, requiredCount);
+  return { ready: assets.length >= minimum, approvedCount: assets.length, requiredCount: minimum,
+    missingAngles: Math.max(0, minimum - assets.length),
+    reasons: assets.length >= minimum ? [] : [`Fotos de estúdio aprovadas: ${assets.length}/${minimum}. Originais e ângulos duplicados não contam.`] };
+}
+export const hasApprovedStudioMedia = (state: MediaState, productId: string) => studioReadiness(state, productId).ready;
+
+export function ingestSupplierOriginals(state: MediaState, productId: string, urls: string[], provenance: string, at: string): MediaState {
+  let next = state;
+  for (const url of [...new Set(urls)]) {
+    if (next.assets.some(asset => asset.productId === productId && asset.kind === 'ORIGINAL' && (asset.url === url || asset.sourceUrl === url))) continue;
+    let index = next.assets.filter(asset => asset.productId === productId && asset.kind === 'ORIGINAL').length + 1;
+    while (next.assets.some(asset => asset.id === `${productId}-original-${index}`)) index++;
+    next = addMedia(next, { productId, url, kind: 'ORIGINAL', purpose: `Referência fornecedor ${index}`, provenance,
+      rightsStatus: 'DECLARADO', destination: 'Arquivo de originais' }, `${productId}-original-${index}`, at);
+    // Acquisition was authorized at production approval; originals stay separate from commercial images.
+    next = reviewMedia(next, next.assets[0].id, 'APROVADA');
+  }
+  return next;
+}

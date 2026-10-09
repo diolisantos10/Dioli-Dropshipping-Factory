@@ -1,8 +1,16 @@
 export type CandidateStatus = 'CANDIDATO' | 'TRIADO' | 'INFORMACAO_SOLICITADA' | 'APROVADO' | 'REJEITADO' | 'ARQUIVADO';
 export type CandidateSource='MANUAL'|'TREND';
-export type CandidateVariant = { sku: string; label: string; price: number | null; stock: number | null; imageUrl?: string };
+export type CandidateVariant = { sku: string; label: string; price: number | null; stock: number | null; imageUrl?: string; attributes?: Record<string, string> };
+export type SupplierDetails = {
+  description?: string; specifications?: Record<string, string>;
+  dimensions?: { lengthCm?: number; widthCm?: number; heightCm?: number };
+  packageDimensions?: { lengthCm?: number; widthCm?: number; heightCm?: number };
+  weightGrams?: number; packageWeightGrams?: number; materials?: string[]; features?: string[];
+  shippingTime?: string; shippingCost?: number; sales?: number; rating?: number; reviewCount?: number;
+  rawData?: Record<string, unknown>;
+};
 // Structured supplier data captured on import; older candidates only carry it inside `notes`.
-export type CandidateSupplier = { name: string; ref: string; cost: number | null; currency: string; stock: number | null; imageUrl: string; images: string[]; variants: CandidateVariant[] };
+export type CandidateSupplier = SupplierDetails & { name: string; ref: string; cost: number | null; currency: string; stock: number | null; imageUrl: string; images: string[]; variants: CandidateVariant[] };
 export type Candidate = { id: string; name: string; fullName?: string; url: string; notes: string; status: CandidateStatus; createdAt: string; source?:CandidateSource; region?:string; category?:string; evidence?:string[]; supplier?: CandidateSupplier };
 export type CandidateInput = { name: string; fullName?: string; url: string; notes: string; source?:CandidateSource; region?:string; category?:string; evidence?:string[]; supplier?: CandidateSupplier };
 export const CANDIDATE_NAME_MAX = 160;
@@ -47,12 +55,11 @@ export function transitionCandidate(state: IntakeState, id: string, status: Cand
   const nextCandidate = { ...candidate, status };
   return { ...state, candidates: state.candidates.map(c => c.id === id ? nextCandidate : c), events: [{ id: eventId, candidateId: id, name: candidate.name, before: candidate.status, after: status, reason: reason.trim(), at, actor, snapshot: structuredClone(nextCandidate) }, ...state.events] };
 }
-// Bulk decisions from the storefront. A shelf item (CANDIDATO) that is approved or rejected passes
-// through TRIADO first, so the audit trail keeps both steps. Ineligible items are skipped, never forced.
-export type BulkStatus = 'APROVADO' | 'REJEITADO' | 'ARQUIVADO';
+// Bulk decisions respect the explicit reservation gate; production starts only after human triage.
+// Ineligible items are skipped, never forced.
+export type BulkStatus = 'TRIADO' | 'APROVADO' | 'REJEITADO' | 'ARQUIVADO';
 export function bulkPath(from: CandidateStatus, to: BulkStatus): CandidateStatus[] | null {
   if (transitions[from].includes(to)) return [to];
-  if (from === 'CANDIDATO' && transitions.TRIADO.includes(to)) return ['TRIADO', to];
   return null;
 }
 export function bulkTransitionCandidates(state: IntakeState, ids: string[], status: BulkStatus, reason: string, newId: () => string, at: string, actor = 'Aprovador · controlado') {
@@ -85,4 +92,12 @@ export function filterCandidates(candidates: Candidate[], filters: CandidateFilt
       && (!filters.status || candidate.status === filters.status)
       && created >= from && created <= to;
   });
+}
+
+export function refreshCandidateSupplier(state: IntakeState, candidateId: string, supplier: CandidateSupplier, eventId: string, at: string, actor: string): IntakeState {
+  const candidate = state.candidates.find(item => item.id === candidateId);
+  if (!candidate) throw new Error('Candidato não encontrado.');
+  if (candidate.supplier?.ref && candidate.supplier.ref !== supplier.ref) throw new Error('A referência do fornecedor não corresponde ao candidato.');
+  const refreshed = { ...candidate, supplier: structuredClone(supplier) };
+  return { ...state, candidates: state.candidates.map(item => item.id === candidateId ? refreshed : item), events: [{ id: eventId, candidateId, name: candidate.name, before: candidate.status, after: candidate.status, reason: 'Dados originais do fornecedor atualizados; seleção e autorização preservadas.', at, actor, snapshot: structuredClone(refreshed) }, ...state.events] };
 }

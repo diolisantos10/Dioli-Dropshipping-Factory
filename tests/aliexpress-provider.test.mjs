@@ -177,7 +177,30 @@ test('ds.product.get devolve todas as fotos e as variantes (SKU) para a vitrine'
       { sku_id: 'A2', sku_available_stock: 0, sku_price: '28', currency_code: 'BRL', ae_sku_property_dtos: [{ sku_property_value: 'Verde' }] },
     ] },
   } }, '55', 'BRL');
-  assert.deepEqual(product.images, ['https://ae01.alicdn.com/1.jpg', 'https://ae01.alicdn.com/2.jpg']);
+  assert.deepEqual(product.images, ['https://ae01.alicdn.com/1.jpg', 'https://ae01.alicdn.com/2.jpg', 'https://ae01.alicdn.com/azul.jpg']);
   assert.deepEqual(product.variants.map((item) => [item.sku, item.label, item.price, item.stock]), [['A1', 'Azul', 30, 5], ['A2', 'Verde', 28, 0]]);
   assert.equal(product.variants[0].imageUrl, 'https://ae01.alicdn.com/azul.jpg');
+});
+
+test('dados brutos completos preservam descrição, todas as imagens e embalagem sem inventar medidas do produto', () => {
+  const result = {
+    ae_item_base_info_dto: { product_id: 77, subject: 'Óculos', detail: '<p>Descrição original</p><img src="https://img.test/detail.jpg"><script>bad()</script>', avg_evaluation_rating: '4.8', evaluation_count: 21, sales_count: 99 },
+    ae_multimedia_info_dto: { image_urls: Array.from({ length: 25 }, (_, index) => `https://img.test/${index}.jpg`) },
+    ae_item_properties: { ae_item_property: [{ attr_name: 'Material', attr_value: 'Acetato' }, { attr_name: 'Lente', attr_value: 'Azul' }] },
+    package_info_dto: { package_length: 20, package_width: 8, package_height: 5, gross_weight: 0.2 },
+    ae_item_sku_info_dtos: [{ sku_id: '1', sku_price: '12' }],
+    custom_supplier_field: { retained: true },
+  };
+  const product = parseDsProduct({ result }, '77', 'BRL');
+  assert.equal(product.images.length, 26);
+  assert.equal(product.description, 'Descrição original');
+  assert.equal(product.specifications.Material, 'Acetato');
+  assert.deepEqual(product.materials, ['Acetato']);
+  assert.equal(product.dimensions, undefined);
+  assert.equal(product.weightGrams, undefined);
+  assert.deepEqual(product.packageDimensions, { lengthCm: 20, widthCm: 8, heightCm: 5 });
+  assert.equal(product.packageWeightGrams, 200);
+  assert.equal(product.rating, 4.8);
+  assert.equal(product.reviewCount, 21);
+  assert.deepEqual(product.rawData.custom_supplier_field, { retained: true });
 });

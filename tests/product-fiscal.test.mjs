@@ -4,7 +4,6 @@ import { fiscalCompletion, fiscalGaps, isValidGtin, normalizeFiscal, normalizeVa
 import { setProductAvailability, updateProductFiscal } from '../src/lib/product-factory.ts';
 import { executeCommand, emptyStates } from '../src/lib/commands.ts';
 import { filterCards, NO_AVAILABILITY, productCard } from '../src/lib/storefront.ts';
-import { catalogRecords, emptyCatalog } from '../src/lib/catalog.ts';
 
 const variant = { id: 'v1', sku: 'MOC-01', title: 'Preta', gtin: '', attributes: {}, dimensions: { lengthCm: null, widthCm: null, heightCm: null }, weightGrams: null };
 const product = (extra = {}) => ({ id: 'p1', candidateId: 'c1', status: 'PRONTO', version: 3, universalTitle: 'Mochila', shortDescription: '', longDescription: '', category: '', bullets: [], benefits: [], tags: [], spec: { variants: [variant], materials: [], colors: [], sizes: [], seo: { title: '', description: '' }, compliance: { notes: '', certifications: [] }, localizations: {}, destinationGaps: {} }, createdAt: 'x', updatedAt: 'x', ...extra });
@@ -72,7 +71,7 @@ test('comandos: operador marca disponibilidade e fiscal; entrada inválida é re
 
 test('vitrine de Disponíveis mostra o selo e filtra por disponibilidade', () => {
   const products = [product({ availability: 'PRONTA_ENTREGA' }), product({ id: 'p2', availability: 'SOB_ENCOMENDA' }), product({ id: 'p3' })];
-  const cards = catalogRecords(emptyCatalog, products, [], [], []).map((record) => productCard(record));
+  const cards = products.map(product => productCard({ product, assignment: { productId: product.id, brandIds: [], storeIds: [], destinations: [], updatedAt: 'now' }, brands: [], stores: [], offers: [], media: [], prices: [], history: [], destinationGaps: {} }));
   assert.equal(cards[0].availability, 'PRONTA_ENTREGA');
   assert.deepEqual(filterCards(cards, { availability: 'SOB_ENCOMENDA' }).map((card) => card.id), ['p2']);
   assert.deepEqual(filterCards(cards, { availability: NO_AVAILABILITY }).map((card) => card.id), ['p3']);

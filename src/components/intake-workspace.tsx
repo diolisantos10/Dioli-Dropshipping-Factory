@@ -11,7 +11,7 @@ import { useServerStates } from '@/components/use-server-states';
 const NAMESPACES = ['intake'] as const;
 const TRIAGE_STATES: CandidateStatus[] = ['TRIADO', 'INFORMACAO_SOLICITADA'];
 const bulkActions: BulkAction[] = [
-  { status: 'APROVADO', label: 'Aprovar', tone: 'primary' },
+  { status: 'APROVADO', label: 'Mandar produzir', tone: 'primary' },
   { status: 'REJEITADO', label: 'Rejeitar', tone: 'danger' },
   { status: 'ARQUIVADO', label: 'Arquivar' },
 ];
@@ -45,7 +45,8 @@ export function IntakeWorkspace({ mode }: { mode: 'intake' | 'triage' | 'audit' 
   }
 
   return <div className="space-y-6">
-    <header><p className="eyebrow">{mode === 'audit' ? 'Histórico de decisões' : 'Entrada → triagem → aprovação'}</p><h1 className="display-title">{mode === 'overview' ? 'Sua fábrica, em movimento.' : mode === 'intake' ? 'Prateleira Bruta' : mode === 'triage' ? 'Sala de Triagem' : 'Auditoria'}</h1></header>
+    <header><p className="eyebrow">{mode === 'audit' ? 'Histórico de decisões' : 'Entrada → reserva na triagem → autorização de produção'}</p><h1 className="display-title">{mode === 'overview' ? 'Sua fábrica, em movimento.' : mode === 'intake' ? 'Prateleira Bruta' : mode === 'triage' ? 'Sala de Triagem' : 'Auditoria'}</h1></header>
+    {mode === 'triage' && <p className="text-sm text-[var(--muted)]">Produtos pré-selecionados, reservados para análise ou lançamento futuro. Só “Mandar produzir” autoriza a esteira automática; reservar não inicia produção.</p>}
     {(error || loadError) && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border border-red-300 bg-red-50 p-4 text-red-800"><span>{error || loadError}</span>{loadError && <button className="ddf-button secondary" onClick={reload}>Tentar de novo</button>}</div>}
     <p role="status" className="text-sm text-green-800">{message}</p>
     {!ready ? <p className="surface p-6 text-sm">Carregando dados do servidor…</p> : <>
@@ -65,13 +66,13 @@ export function IntakeWorkspace({ mode }: { mode: 'intake' | 'triage' | 'audit' 
         </form>
       </details>}
       {(mode === 'intake' || mode === 'triage') && <Storefront
-        cards={cards} stateOptions={stateOptions} defaultState={mode === 'intake' ? 'CANDIDATO' : ''} bulkActions={bulkActions} onBulk={onBulk}
+        cards={cards} stateOptions={stateOptions} defaultState={mode === 'intake' ? 'CANDIDATO' : ''} bulkActions={mode === 'intake' ? [{ status: 'TRIADO', label: 'Reservar na triagem', tone: 'primary' }, { status: 'ARQUIVADO', label: 'Arquivar' }] : bulkActions} onBulk={onBulk}
         loading={status === 'loading' && !fromCache}
         emptyText={mode === 'triage' ? 'Envie produtos da Prateleira Bruta para a triagem ou ajuste os filtros.' : 'Importe do AliExpress em Integrações, cadastre uma oportunidade ou ajuste os filtros.'}
         renderDetail={card => {
           const candidate = state.candidates.find(c => c.id === card.id);
           if (!candidate) return null;
-          return <CandidateSteps key={candidate.id} status={candidate.status} evidence={candidate.evidence ?? []} onStep={(next, reason) => sendCommand(command('intake.transition', { candidateId: candidate.id, status: next, reason })).then(() => { setError(''); setMessage('Decisão registrada e auditada no servidor.'); })} />;
+          return <CandidateSteps key={candidate.id} status={candidate.status} evidence={candidate.evidence ?? []} notes={candidate.notes} onStep={(next, reason) => sendCommand(command('intake.transition', { candidateId: candidate.id, status: next, reason })).then(() => { setError(''); setMessage('Decisão registrada e auditada no servidor.'); })} />;
         }}
       />}
       {mode === 'audit' && <section className="space-y-3">
@@ -83,11 +84,12 @@ export function IntakeWorkspace({ mode }: { mode: 'intake' | 'triage' | 'audit' 
 }
 
 // Single-item steps that are not part of the bulk bar (triage hand-off and information requests).
-function CandidateSteps({ status, evidence, onStep }: { status: CandidateStatus; evidence: string[]; onStep: (status: CandidateStatus, reason: string) => Promise<void> }) {
+function CandidateSteps({ status, evidence, notes, onStep }: { status: CandidateStatus; evidence: string[]; notes: string; onStep: (status: CandidateStatus, reason: string) => Promise<void> }) {
   const [pending, setPending] = useState<CandidateStatus | null>(null);
   const [error, setError] = useState('');
   const actions = stepActions[status] ?? [];
   return <div className="space-y-3">
+    {notes && <div><h3 className="font-semibold">Observações da seleção</h3><p className="mt-1 whitespace-pre-wrap text-sm">{notes}</p></div>}
     {evidence.length > 0 && <div><h3 className="font-semibold">Evidências</h3><ul className="mt-1 list-disc pl-5 text-sm">{evidence.map(item => <li key={item}>{item}</li>)}</ul></div>}
     {actions.length > 0 && <div className="flex flex-wrap gap-2">{actions.map(action => <button key={action.status} className="ddf-button secondary" onClick={() => setPending(action.status)}>{action.label}</button>)}</div>}
     {pending && <form className="space-y-2" onSubmit={event => { event.preventDefault(); const reason = String(new FormData(event.currentTarget).get('reason')); onStep(pending, reason).then(() => setPending(null), cause => setError(errorMessage(cause, 'Não foi possível salvar.'))); }}>

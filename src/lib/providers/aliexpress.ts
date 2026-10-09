@@ -44,7 +44,7 @@ function money(value: unknown): number {
 function httpsUrl(value: unknown): string {
   const raw = text(value);
   if (!raw) return '';
-  try { const url = new URL(raw.startsWith('//') ? `https:${raw}` : raw); url.protocol = 'https:'; return url.href; } catch { return ''; }
+  try { const url = new URL(raw.startsWith('//') ? `https:${raw}` : raw); if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return ''; url.protocol = 'https:'; return url.href; } catch { return ''; }
 }
 
 function requireCredentials(credentials: AliExpressCredentials, needsToken: boolean) {
@@ -193,8 +193,8 @@ export function parseDsProduct(body: Record<string, unknown>, itemId: string, fa
   const prices = (available.length ? available : skus).map(priceOf).filter((price) => Number.isFinite(price) && price > 0);
   const quantities = skus.map(stockOf);
   const knownStock = quantities.every((quantity) => typeof quantity === 'number');
-  const images = [...new Set((Array.isArray(multimedia.image_urls) ? multimedia.image_urls.map(text) : text(multimedia.image_urls).split(';')).map(httpsUrl).filter(Boolean))].slice(0, 20);
-  const variants = skus.slice(0, 50).map((sku, index) => {
+  const images = [...new Set((Array.isArray(multimedia.image_urls) ? multimedia.image_urls.map(text) : text(multimedia.image_urls).split(';')).map(httpsUrl).filter(Boolean))];
+  const variants = skus.map((sku, index) => {
     const properties = list(sku.ae_sku_property_dtos).map(record);
     const label = properties.map((item) => text(item.property_value_definition_name ?? item.sku_property_value)).filter(Boolean).join(' / ');
     const price = priceOf(sku);
@@ -203,15 +203,33 @@ export function parseDsProduct(body: Record<string, unknown>, itemId: string, fa
       sku: text(sku.sku_id ?? sku.id ?? sku.sku_attr) || `sku-${index + 1}`, label: label || `Variante ${index + 1}`,
       price: Number.isFinite(price) && price > 0 ? price : null, stock: typeof stock === 'number' ? stock : null,
       imageUrl: httpsUrl(properties.map((item) => text(item.sku_image)).find(Boolean)),
+      attributes: Object.fromEntries(properties.map((item) => [text(item.sku_property_name ?? item.sku_property_id), text(item.property_value_definition_name ?? item.sku_property_value)]).filter(([key, value]) => key && value)),
     };
   });
-  const deliveryDays = Number(record(result.logistics_info_dto).delivery_time);
+  const logistics = record(result.logistics_info_dto);
+  const deliveryDays = Number(logistics.delivery_time);
+  const packageInfo = record(result.package_info_dto);
+  const positive = (value: unknown) => { const number = money(value); return Number.isFinite(number) && number > 0 ? number : undefined; };
+  const descriptionHtml = text(base.detail ?? base.description);
+  // Keep supplier HTML as evidence, but display plain text: no remote scripts or injected markup.
+  const description = descriptionHtml.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '').replace(/<(?:br|\/p|\/div|\/li)\b[^>]*>/gi, '\n').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+  const descriptionImages = [...descriptionHtml.matchAll(/<img\b[^>]*?\bsrc=["']([^"']+)["']/gi)].map(match => httpsUrl(match[1])).filter(Boolean);
+  // Preserve every available gallery, description and variant image, without the old 20-photo cap.
+  const allImages = [...new Set([...images, ...descriptionImages, ...variants.map(variant => variant.imageUrl).filter(Boolean)])];
+  const specifications: Record<string, string> = Object.fromEntries(list(result.ae_item_properties).map(record).map(property => [text(property.attr_name ?? property.property_name), text(property.attr_value ?? property.property_value)]).filter(([key, value]) => key && value));
+  const materials = Object.entries(specifications).filter(([key]) => /material|fabric|tecido/i.test(key)).map(([, value]) => value);
+  const packageDimensions = { lengthCm: positive(packageInfo.package_length), widthCm: positive(packageInfo.package_width), heightCm: positive(packageInfo.package_height) };
+  const packageWeightKg = positive(packageInfo.gross_weight);
+  const numeric = (value: unknown) => { if (value === undefined || value === null || value === '') return undefined; const parsed = money(value); return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined; };
   return {
     itemId: text(base.product_id) || itemId, title: text(base.subject),
     price: prices.length ? Math.min(...prices) : 0,
     currency: (text(skus[0]?.currency_code) || text(base.currency_code) || fallbackCurrency).toUpperCase(),
     imageUrl: images[0] ?? '',
-    images, variants,
+    images: allImages, variants, description, specifications, materials,
+    packageDimensions, packageWeightGrams: packageWeightKg === undefined ? undefined : packageWeightKg * 1000,
+    sales: numeric(base.sales_count ?? base.sales), rating: numeric(base.avg_evaluation_rating), reviewCount: numeric(base.evaluation_count),
+    shippingCost: numeric(logistics.freight_amount), rawData: structuredClone(result),
     detailUrl: `https://www.aliexpress.com/item/${itemId}.html`,
     stock: skus.length && !available.length ? 0 : knownStock && skus.length ? quantities.reduce<number>((sum, quantity) => sum + (quantity ?? 0), 0) : undefined,
     shippingTime: Number.isFinite(deliveryDays) && deliveryDays > 0 ? `${deliveryDays} dias` : undefined,

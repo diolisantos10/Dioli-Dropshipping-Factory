@@ -1,8 +1,8 @@
 // Storefront view model shared by Prateleira Bruta, Triagem and Disponíveis: every item becomes a
 // product card (photo, name, cost, suggested price, stock, supplier) with the same filters.
 import type { CatalogRecord, CurationStatus } from './catalog.ts';
-import type { Candidate, CandidateStatus } from './intake.ts';
-import type { MediaAsset } from './media-factory.ts';
+import type { Candidate, CandidateStatus, CandidateSupplier } from './intake.ts';
+import { approvedStudioMedia } from './media-factory.ts';
 import type { PriceCalculation } from './pricing.ts';
 import { fiscalCompletion, type Availability } from './product-fiscal.ts';
 
@@ -13,12 +13,11 @@ export type StoreCard = {
   stock: number | null; supplier: string; supplierRef: string; state: string; stateLabel: string;
   category: string; url: string; description: string; variants: CardVariant[]; searchText: string;
   // Stock model badge; only master products carry it (candidates have no stock model yet).
-  availability?: Availability; fiscalCompletion?: number;
+  availability?: Availability; fiscalCompletion?: number; sourceDetails?: CandidateSupplier;
 };
 export type StoreFilters = { query?: string; minCost?: string; maxCost?: string; supplier?: string; state?: string; availability?: string };
 export const NO_AVAILABILITY = 'SEM_DEFINICAO';
 
-const IMAGE_URL = /\.(jpe?g|png|webp|avif|gif)(\?|#|$)/i;
 const line = (notes: string, label: string) => notes.split('\n').find(item => item.toLocaleLowerCase('pt-BR').startsWith(`${label}:`))?.slice(label.length + 1).trim() ?? '';
 
 // Candidates imported before structured supplier data existed keep it in the notes text.
@@ -36,14 +35,14 @@ export function parseLegacyNotes(notes: string) {
 }
 
 export const candidateStateLabels: Record<CandidateStatus, string> = {
-  CANDIDATO: 'Na prateleira', TRIADO: 'Aguardando decisão', INFORMACAO_SOLICITADA: 'Informação solicitada', APROVADO: 'Aprovado', REJEITADO: 'Rejeitado', ARQUIVADO: 'Arquivado',
+  CANDIDATO: 'Na prateleira', TRIADO: 'Reservado na triagem', INFORMACAO_SOLICITADA: 'Informação solicitada', APROVADO: 'Produção autorizada', REJEITADO: 'Rejeitado', ARQUIVADO: 'Arquivado',
 };
 
 export function candidateCard(candidate: Candidate): StoreCard {
   const legacy = parseLegacyNotes(candidate.notes);
   const supplier = candidate.supplier;
   const images = [...new Set([supplier?.imageUrl, ...(supplier?.images ?? []), legacy.imageUrl].filter((item): item is string => !!item))];
-  const variants = (supplier?.variants ?? []).map((item, index) => ({ id: item.sku || String(index), label: item.label, detail: `SKU ${item.sku}`, price: item.price, stock: item.stock, imageUrl: item.imageUrl ?? '' }));
+  const variants = (supplier?.variants ?? []).map((item, index) => ({ id: item.sku || String(index), label: item.label, detail: [`SKU ${item.sku}`, ...Object.entries(item.attributes ?? {}).map(([key, value]) => `${key}: ${value}`)].join(' · '), price: item.price, stock: item.stock, imageUrl: item.imageUrl ?? '' }));
   const fullTitle = candidate.fullName || candidate.name;
   const card: Omit<StoreCard, 'searchText'> = {
     id: candidate.id, title: candidate.name, fullTitle, imageUrl: images[0] ?? '', images,
@@ -51,14 +50,13 @@ export function candidateCard(candidate: Candidate): StoreCard {
     suggestedPrice: null, priceCurrency: supplier?.currency || legacy.currency || 'BRL',
     stock: supplier?.stock ?? legacy.stock, supplier: supplier?.name || legacy.supplier || (candidate.source === 'TREND' ? 'Trend' : 'Manual'),
     supplierRef: supplier?.ref || legacy.ref, state: candidate.status, stateLabel: candidateStateLabels[candidate.status],
-    category: candidate.category ?? '', url: candidate.url, description: candidate.notes, variants,
+    category: candidate.category ?? '', url: candidate.url, description: supplier?.description || '', variants, sourceDetails: supplier ?? { name: legacy.supplier || 'Manual', ref: legacy.ref, cost: legacy.cost, currency: legacy.currency || 'BRL', stock: legacy.stock, imageUrl: legacy.imageUrl, images, variants: [] },
   };
   return { ...card, searchText: [fullTitle, candidate.url, candidate.notes, card.supplier, card.supplierRef, card.category].join(' ').toLocaleLowerCase('pt-BR') };
 }
 
 export const curationLabels: Record<CurationStatus | 'PRONTO', string> = { PRONTO: 'Pronto', APROVADO: 'Aprovado', REJEITADO: 'Rejeitado', ARQUIVADO: 'Arquivado' };
 
-const isImage = (asset: MediaAsset) => asset.mimeType ? asset.mimeType.startsWith('image/') : IMAGE_URL.test(asset.url) || asset.url.startsWith('/api/media');
 // Newest calculation first; an approved price wins over a pending one, a blocked one never shows.
 export function suggestedPriceOf(prices: PriceCalculation[]) {
   const usable = prices.filter(item => item.suggestedPrice !== null && item.status !== 'BLOQUEADO').sort((a, b) => b.at.localeCompare(a.at));
@@ -69,8 +67,8 @@ export function suggestedPriceOf(prices: PriceCalculation[]) {
 export function productCard(record: CatalogRecord, candidate?: Candidate, curation?: CurationStatus): StoreCard {
   const product = record.product;
   const origin = candidate ? candidateCard(candidate) : null;
-  const approved = record.media.filter(item => item.status === 'APROVADA' && isImage(item)).map(item => item.url);
-  const images = [...new Set([...approved, ...(origin?.images ?? [])])];
+  const approved = approvedStudioMedia(record.media, product.id).map(item => item.url);
+  const images = [...new Set(approved)];
   const offers = [...record.offers].sort((a, b) => a.cost - b.cost);
   const cheapest = offers[0];
   const knownStock = offers.filter(item => item.stock !== null);

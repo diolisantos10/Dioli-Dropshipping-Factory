@@ -10,11 +10,12 @@ const server = (payloads, failing = []) => async (url) => {
   return Response.json({ payload: payloads[namespace] ?? null, revision: 1 });
 };
 
-test('bug /disponiveis: 148 produtos PRONTO do servidor aparecem mesmo com mídia versão 2', async () => {
+test('servidor carrega mídia versão 2; legado PRONTO incompleto permanece fora de Disponíveis', async () => {
   const products = { version: 1, products: Array.from({ length: 148 }, (_, index) => readyProduct(index)), events: [] };
   const states = await fetchStates(['products', 'media', 'pricing', 'catalog'], server({ products, media: { version: 2, assets: [], jobs: [] } }));
   const records = catalogRecords(states.catalog, states.products.products, states.media.assets, states.pricing.calculations, states.products.events);
-  assert.equal(records.length, 148);
+  assert.equal(states.products.products.length, 148);
+  assert.equal(records.length, 0);
 });
 
 test('namespace vazio no servidor vira estado vazio, sem erro', async () => {

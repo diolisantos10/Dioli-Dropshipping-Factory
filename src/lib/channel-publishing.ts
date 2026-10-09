@@ -4,7 +4,8 @@ import { getChannelAdapterForIntegration } from './integrations';
 import { plainTextToHtml } from './providers/shopify';
 import type { ChannelListingInput } from './providers/types';
 import { getDatabasePool, readState } from './server-state';
-import { emptyMedia, type MediaState } from './media-factory';
+import { approvedStudioAssets, emptyMedia, type MediaState } from './media-factory';
+import { catalogReadiness } from './catalog';
 import { emptyPricing, type PriceCalculation, type PricingState } from './pricing';
 import { emptyProductFactory, type MasterProduct, type ProductFactoryState } from './product-factory';
 
@@ -14,9 +15,11 @@ export function latestApprovedPrice(pricing: PricingState, productId: string): P
 
 export function listingInputFor(product: MasterProduct, price: PriceCalculation, media: MediaState, externalId: string | null): ChannelListingInput {
   if (product.status !== 'PRONTO') throw new CommandError('Somente produtos PRONTOS podem ser publicados.');
+  const ready = catalogReadiness(product, media.assets);
+  if (!ready.ready) throw new CommandError(`Produto ainda incompleto: ${ready.gaps.join(', ')}.`);
   const bullets = product.bullets.filter(Boolean);
   const description = [plainTextToHtml(product.longDescription || product.shortDescription), bullets.length ? `<ul>${bullets.map((item) => `<li>${plainTextToHtml(item).replace(/^<p>|<\/p>$/g, '')}</li>`).join('')}</ul>` : ''].join('');
-  const images = media.assets.filter((asset) => asset.productId === product.id && asset.status === 'APROVADA' && asset.url.startsWith('https://') && !(asset.mimeType ?? '').startsWith('video/')).map((asset) => asset.url);
+  const images = approvedStudioAssets(media, product.id).filter(asset => asset.url.startsWith('https://')).map(asset => asset.url);
   return {
     externalId, title: product.spec?.seo.title?.trim() || product.universalTitle, descriptionHtml: description,
     productType: product.category, tags: product.tags, vendor: 'DDF', sku: product.spec?.variants[0]?.sku || `DDF-${product.id.slice(0, 8).toUpperCase()}`,

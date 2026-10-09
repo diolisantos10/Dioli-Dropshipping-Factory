@@ -113,7 +113,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           <div className="desktop-only mt-8 border-t border-[var(--rail-line)] px-2 pt-5">
             <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--rail-muted)]">Marcas DDF</p>
-            <p className="mt-2 text-xs text-[var(--rail-ink)]">Santioh · Dilee · Dilix · Queise</p>
+            <p className="mt-2 text-xs text-[var(--rail-ink)]">Santioh · Dilly</p>
             <div className="mt-5 flex items-center gap-3">
               <span className="grid h-9 w-9 place-items-center rounded-full bg-[var(--rail-line)] text-xs font-bold">AD</span>
               <div className="min-w-0">

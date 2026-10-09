@@ -7,3 +7,12 @@ test('bloqueia URL que não pertence ao AliExpress',()=>{assert.throws(()=>suppl
 test('nome com mais de 160 caracteres é truncado e o completo fica em fullName',async()=>{const{addCandidate,emptyIntake}=await import('../src/lib/intake.ts');const long='Mochila impermeável '.repeat(12).trim();assert.ok(long.length>160);const input=supplierCandidateInput({...product,title:long},'AliExpress');assert.equal(Array.from(input.name).length,160);assert.ok(input.name.endsWith('…'));assert.equal(input.fullName,long);const state=addCandidate(emptyIntake,input,'c1','2026-09-26T00:00:00Z');assert.equal(state.candidates[0].fullName,long);assert.equal(state.candidates[0].name,input.name)});
 test('nome curto não gera fullName e emojis não são cortados ao meio',async()=>{const{truncateName}=await import('../src/lib/intake.ts');const input=supplierCandidateInput(product,'AliExpress');assert.equal(input.name,product.title);assert.equal('fullName' in input,false);const emoji='😀'.repeat(200);const cut=truncateName(emoji);assert.equal(Array.from(cut).length,160);assert.equal(cut.isWellFormed(),true);assert.equal(truncateName('a'.repeat(160)),'a'.repeat(160))});
 test('importação guarda dados estruturados do fornecedor (custo, estoque, fotos, variantes)',()=>{const input=supplierCandidateInput({...product,images:['https://ae01.alicdn.com/image.jpg','https://ae01.alicdn.com/2.jpg'],variants:[{sku:'s1',label:'Preto',price:12.5,stock:8,imageUrl:''}]},'AliExpress principal');assert.equal(input.supplier.cost,12.5);assert.equal(input.supplier.stock,8);assert.deepEqual(input.supplier.images,['https://ae01.alicdn.com/image.jpg','https://ae01.alicdn.com/2.jpg']);assert.equal(input.supplier.variants.length,1);assert.equal(input.supplier.name,'AliExpress principal')});
+
+test('importação preserva ficha técnica completa e todas as imagens além do antigo limite', () => {
+  const details = { description: 'Fornecedor original', specifications: { Material: 'Algodão' }, weightGrams: 250, dimensions: { lengthCm: 30 }, rawData: { supplierExtra: 'original' }, images: Array.from({ length: 24 }, (_, index) => `https://img.test/${index}.jpg`) };
+  const input = supplierCandidateInput({ ...product, ...details }, 'AliExpress');
+  assert.equal(input.supplier.images.length, 25);
+  assert.equal(input.supplier.description, details.description);
+  assert.equal(input.supplier.weightGrams, 250);
+  assert.deepEqual(input.supplier.rawData, details.rawData);
+});

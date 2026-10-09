@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { addMedia, reviewMedia } from '../src/lib/media-factory.ts';
+import { emptyTechnical } from '../src/lib/product-factory.ts';
 import { executeCommand, emptyStates, authorizeCommand } from '../src/lib/commands.ts';
 
 let counter = 0;
@@ -17,8 +19,18 @@ function readyWorld() {
   s = run(s, 'intake.transition', { candidateId, status: 'APROVADO', reason: 'margem ok' }, ctx('APPROVER', 'bruno'));
   s = run(s, 'products.start', { candidateId });
   const productId = s.products.products[0].id;
-  s = run(s, 'products.update', { productId, universalTitle: 'Óculos', category: 'Acessórios', shortDescription: 'curta', longDescription: 'longa', bullets: ['a', 'b', 'c'], benefits: ['x', 'y'], tags: ['sol'] });
+  s = run(s, 'products.update', { productId, universalTitle: 'Óculos', category: 'Acessórios', shortDescription: 'curta', longDescription: 'longa', bullets: ['a', 'b', 'c'], benefits: ['x', 'y'], tags: ['sol'], spec:{variants:[],materials:['Acetato'],colors:[],sizes:[],seo:{title:'Óculos',description:'curta'},compliance:{notes:'',certifications:[]},localizations:{},destinationGaps:{},technical:{...structuredClone(emptyTechnical),weightGrams:35,dimensions:{lengthCm:14,widthCm:14,heightCm:5}}} });
   return { s, candidateId, productId };
+}
+
+function withStudio(s,productId){
+ const source=s.media.assets.find(asset=>asset.productId===productId&&asset.kind==='ORIGINAL'&&asset.status==='APROVADA');
+ for(const angle of ['frente','trás','lateral','detalhe']){
+  const id=`studio-${productId}-${angle}`;
+  s={...s,media:addMedia(s.media,{productId,url:`https://img.test/${id}.jpg`,kind:'DERIVADA',purpose:`Estúdio ${angle}`,provenance:'Teste de geração com referência',originalAssetId:source.id,rightsStatus:'DECLARADO',transformationNotes:'Fundo neutro; produto preservado',studio:true,studioAngle:angle,fidelityVerified:true,fidelityEvidence:'Conferido contra referência original'},id,'2026-09-25T12:00:00Z')};
+  s={...s,media:reviewMedia(s.media,id,'APROVADA')};
+ }
+ return s;
 }
 
 test('ator autenticado e horário do servidor ficam registrados na decisão', () => {
@@ -41,6 +53,8 @@ test('produto só fica PRONTO com mídia aprovada lida do servidor', () => {
   s = run(s, 'media.addAsset', { asset: { productId, url: 'https://img.test/a.jpg', kind: 'ORIGINAL', purpose: 'principal', provenance: 'fornecedor', rightsStatus: 'DECLARADO' } });
   assert.throws(() => run(s, 'media.review', { assetId: s.media.assets[0].id, status: 'APROVADA' }, ctx('OPERATOR')), /papel/);
   s = run(s, 'media.review', { assetId: s.media.assets[0].id, status: 'APROVADA' }, ctx('APPROVER'));
+  assert.throws(() => run(s,'products.markReady',{productId}), /mídia/i);
+  s = withStudio(s,productId);
   s = run(s, 'products.markReady', { productId }, ctx('APPROVER'));
   assert.equal(s.products.products[0].status, 'PRONTO');
   assert.throws(() => run(s, 'media.addAsset', { asset: { productId, url: 'https://img.test/b.jpg', kind: 'ORIGINAL', purpose: 'extra', provenance: 'x' } }), /em produção/);
@@ -52,6 +66,7 @@ test('pricing exige produto PRONTO e aprovação usa o usuário autenticado', ()
   assert.throws(() => run(s, 'pricing.calculate', { input: priceInput }), /PRONTOS/);
   s = run(s, 'media.addAsset', { asset: { productId, url: 'https://img.test/a.jpg', kind: 'ORIGINAL', purpose: 'p', provenance: 'x' } });
   s = run(s, 'media.review', { assetId: s.media.assets[0].id, status: 'APROVADA' });
+  s = withStudio(s,productId);
   s = run(s, 'products.markReady', { productId });
   s = run(s, 'pricing.calculate', { input: priceInput }, ctx('OPERATOR'));
   const calc = s.pricing.calculations[0];
@@ -68,6 +83,7 @@ test('pedidos e catálogo exigem produto PRONTO; cancelamento é decisão de apr
   assert.throws(() => run(s, 'catalog.addOffer', { productId, supplierRef: '1005001', supplierName: 'AliExpress', cost: 10, currency: 'USD' }), /PRONTOS/);
   s = run(s, 'media.addAsset', { asset: { productId, url: 'https://img.test/a.jpg', kind: 'ORIGINAL', purpose: 'p', provenance: 'x' } });
   s = run(s, 'media.review', { assetId: s.media.assets[0].id, status: 'APROVADA' });
+  s = withStudio(s,productId);
   s = run(s, 'products.markReady', { productId });
   s = run(s, 'orders.receive', { externalOrderId: 'E1', productId, salePrice: 100, costSnapshot: 50 }, ctx('SYSTEM', 'system:cron'));
   assert.throws(() => run(s, 'orders.receive', { externalOrderId: 'E1', productId, salePrice: 100, costSnapshot: 50 }), /já processado/);
@@ -98,6 +114,7 @@ test('comando em massa da vitrine: operador arquiva, só aprovador aprova ou rej
   s = run(s, 'intake.addCandidate', { name: 'A', url: 'https://example.com/a', notes: '' });
   s = run(s, 'intake.addCandidate', { name: 'B', url: 'https://example.com/b', notes: '' });
   const ids = s.intake.candidates.map((c) => c.id);
+  s = run(s, 'intake.bulkTransition', { candidateIds: ids, status: 'TRIADO', reason: 'Reservar' });
   s = run(s, 'intake.bulkTransition', { candidateIds: ids, status: 'APROVADO', reason: 'Lote aprovado' }, ctx('APPROVER', 'bruno'));
   assert.deepEqual(s.intake.candidates.map((c) => c.status), ['APROVADO', 'APROVADO']);
   assert.ok(s.intake.events.filter((e) => e.after === 'APROVADO').every((e) => e.actor === 'bruno'));
@@ -126,7 +143,25 @@ test('curadoria em massa de Disponíveis só aceita produtos PRONTOS', () => {
   assert.throws(() => run(s, 'catalog.bulkCurate', { productIds: [productId], status: 'ARQUIVADO', reason: 'x' }), /PRONTOS/);
   let ready = run(s, 'media.addAsset', { asset: { productId, url: 'https://img.test/a.jpg', kind: 'ORIGINAL', purpose: 'p', provenance: 'x' } });
   ready = run(ready, 'media.review', { assetId: ready.media.assets[0].id, status: 'APROVADA' });
+  ready = withStudio(ready,productId);
   ready = run(ready, 'products.markReady', { productId });
   ready = run(ready, 'catalog.bulkCurate', { productIds: [productId], status: 'ARQUIVADO', reason: 'Fora da coleção' }, ctx('APPROVER', 'bruno'));
   assert.deepEqual(ready.catalog.curation.map((item) => [item.productId, item.status, item.actor]), [[productId, 'ARQUIVADO', 'bruno']]);
+});
+
+
+test('arquivo interno conserva origem e impede troca de URL pelo navegador', () => {
+ const previous = process.env.DDF_PUBLIC_URL;
+ process.env.DDF_PUBLIC_URL='https://ddf.example';
+ try {
+  let {s,productId}=readyWorld();
+  s=run(s,'media.addAsset',{asset:{productId,url:'https://ae01.alicdn.com/a.jpg',kind:'ORIGINAL',purpose:'Referência',provenance:'AliExpress',rightsStatus:'DECLARADO'}});
+  const assetId=s.media.assets[0].id;
+  const input={assetId,url:'https://ddf.example/api/media?id=00000000-0000-4000-8000-000000000000',checksum:'a'.repeat(64),mimeType:'image/jpeg',bytes:123};
+  assert.throws(()=>run(s,'media.persistOriginal',input,ctx('ADMIN')),/papel/);
+  assert.throws(()=>run(s,'media.persistOriginal',{...input,url:'https://outside.example/api/media?id=00000000-0000-4000-8000-000000000000'},ctx('SYSTEM')),/interno/);
+  s=run(s,'media.persistOriginal',input,ctx('SYSTEM'));
+  assert.equal(s.media.assets[0].sourceUrl,'https://ae01.alicdn.com/a.jpg');
+  assert.equal(s.media.assets[0].bytes,123);
+ } finally { if(previous===undefined) delete process.env.DDF_PUBLIC_URL; else process.env.DDF_PUBLIC_URL=previous; }
 });
