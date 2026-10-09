@@ -98,7 +98,7 @@ export function approvedStudioMedia(assets: MediaAsset[], productId: string): Me
       (asset.mimeType ?? '').startsWith('video/')) return false;
     const references = asset.sourceAssetIds?.length ? asset.sourceAssetIds : [asset.originalAssetId];
     if (!references.every(id => assets.some(original => original.id === id && original.productId === productId && original.kind === 'ORIGINAL' && original.status === 'APROVADA')) || !references.length) return false;
-    if (assets.some(original => original.kind === 'ORIGINAL' && original.url === asset.url)) return false;
+    if (assets.some(original => original.kind === 'ORIGINAL' && (original.url === asset.url || original.sourceUrl === asset.url))) return false;
     const angle = asset.studioAngle.trim().toLowerCase();
     if (urls.has(asset.url) || angles.has(angle)) return false;
     urls.add(asset.url); angles.add(angle); return true;

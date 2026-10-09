@@ -28,7 +28,7 @@ export async function generateStudioPack(state: MediaState, input: { productId: 
     if (url.protocol !== 'https:' || url.username || url.password || !output.mimeType?.startsWith('image/')) throw new Error('Saída de estúdio inválida: exige imagem HTTPS.');
     if (!output.neutralBackground || !output.fidelityVerified || !output.fidelityEvidence?.trim() || !output.generationId?.trim()) throw new Error('Geração bloqueada: fundo neutro e fidelidade não foram comprovados.');
     const angle = output.angle?.trim().toLowerCase();
-    if (!angle || angles.has(angle) || urls.has(output.url) || originals.some(asset => asset.url === output.url)) throw new Error('Geração bloqueada: ângulo duplicado ou original apresentado como foto gerada.');
+    if (!angle || angles.has(angle) || urls.has(output.url) || originals.some(asset => asset.url === output.url || asset.sourceUrl === output.url)) throw new Error('Geração bloqueada: ângulo duplicado ou original apresentado como foto gerada.');
     if (!output.sourceAssetIds?.length || !output.sourceAssetIds.every(id => originals.some(asset => asset.id === id))) throw new Error('Geração bloqueada: faltam referências válidas para verificar o ângulo.');
     angles.add(angle); urls.add(output.url);
   }

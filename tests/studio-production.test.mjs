@@ -29,3 +29,5 @@ test('reimportar fotos arquivadas não duplica originais',()=>{
  const archived={...state,assets:state.assets.map(asset=>({...asset,sourceUrl:asset.url,url:'https://ddf.example/api/media?id='+asset.id}))};
  assert.deepEqual(ingestSupplierOriginals(archived,'p',originalUrls,'AliExpress',at),archived);
 });
+
+test('URL do fornecedor arquivada também não pode virar foto de estúdio',async()=>{const state=source();const archived={...state,assets:state.assets.map(asset=>({...asset,sourceUrl:asset.url,url:'https://ddf.example/api/media?id='+asset.id}))};const outputs=output();outputs[0].url=originalUrls[0];await assert.rejects(generateStudioPack(archived,{productId:'p',title:'Item',technicalDescription:''},{name:'test',generateStudio:async()=>outputs},at),/original apresentado/);});
