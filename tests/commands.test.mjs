@@ -40,6 +40,31 @@ test('ator autenticado e horário do servidor ficam registrados na decisão', ()
   assert.equal(s.intake.events.at(-1).actor, 'ana');
 });
 
+test('releitura do fornecedor completa rascunho a partir do estado persistido, preserva edição e registra versão', () => {
+ let {s,candidateId,productId}=readyWorld();
+ const before=s.products.products[0];
+ before.spec.variants=[{id:'custom-p',sku:'P',title:'Nome editado',gtin:'',attributes:{},dimensions:{lengthCm:77,widthCm:null,heightCm:null},weightGrams:null}];
+ const supplier={name:'Loja',ref:'1',cost:20,currency:'BRL',stock:3,imageUrl:'https://img.test/1.jpg',images:['https://img.test/1.jpg'],variants:[
+  {sku:'P',label:'Pequeno',price:20,stock:1,dimensions:{lengthCm:10,widthCm:5,heightCm:2},weightGrams:100},
+  {sku:'G',label:'Grande',price:30,stock:1,dimensions:{lengthCm:20,widthCm:8,heightCm:4},weightGrams:200},
+ ]};
+ s=run(s,'intake.refreshSupplier',{candidateId,supplier},ctx('SYSTEM'));
+ assert.throws(()=>run(s,'products.refreshSupplier',{productId},ctx('OPERATOR')),/papel/);
+ s=run(s,'products.refreshSupplier',{productId,supplier:{weightGrams:999}},ctx('SYSTEM','system:factory-production'));
+ const after=s.products.products[0];
+ assert.equal(after.spec.variants[0].title,'Nome editado');
+ assert.deepEqual(after.spec.variants[0].dimensions,{lengthCm:77,widthCm:5,heightCm:2});
+ assert.equal(after.spec.variants[0].weightGrams,100);
+ assert.equal(after.spec.variants[1].sku,'G');
+ assert.equal(after.spec.variants[1].weightGrams,200);
+ assert.equal(after.spec.technical.weightGrams,35);
+ assert.equal(after.universalTitle,before.universalTitle);
+ assert.equal(after.version,before.version+1);
+ assert.equal(s.products.events[0].actor,'system:factory-production');
+ const again=run(s,'products.refreshSupplier',{productId},ctx('SYSTEM'));
+ assert.equal(again.products.products[0].version,after.version);
+});
+
 test('portão de portfólio: operador não aprova nem rejeita candidato', () => {
   assert.throws(() => authorizeCommand('intake.transition', { status: 'APROVADO' }, 'OPERATOR'), /papel/);
   assert.throws(() => authorizeCommand('intake.transition', { status: 'REJEITADO' }, 'OPERATOR'), /papel/);

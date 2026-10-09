@@ -16,7 +16,11 @@ try {
     signal: AbortSignal.timeout(290_000),
   });
   const body = await response.json().catch(() => ({}));
-  const summary = (body.results ?? []).map((item) => `${item.task}=${item.status}${item.error ? ` (${item.error})` : ''}`).join(' | ');
+  const summary = (body.results ?? []).map((item) => {
+    const vision = item.detail?.vision;
+    const visionSummary = vision ? ` [vision: checked=${Number(vision.checked ?? 0)}, failed=${Number(vision.failed ?? 0)}, remaining=${Number(vision.remaining ?? 0)}${vision.reason ? `, ${vision.reason}` : ''}${(vision.results ?? []).filter(result => result.code).map(result => `, ${result.code}`).join('')}]` : '';
+    return `${item.task}=${item.status}${item.error ? ` (${item.error})` : ''}${visionSummary}`;
+  }).join(' | ');
   console.log(`[ddf-cron] HTTP ${response.status} · ${body.status ?? body.error ?? 'sem corpo'} · ${Date.now() - started} ms${summary ? ` · ${summary}` : ''}`);
   // 409 = another run in progress: not a failure of this invocation.
   process.exit(response.ok || response.status === 409 ? 0 : 1);

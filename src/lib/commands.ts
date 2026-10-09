@@ -3,7 +3,7 @@
 // computed payload. Identity, timestamps and IDs come from the server context, and cross-module
 // rules (approved candidate, approved media, READY product, approver role) are enforced here.
 import { addCandidate, bulkTransitionCandidates, refreshCandidateSupplier, emptyIntake, transitionCandidate, type CandidateSource, type CandidateStatus, type CandidateSupplier, type IntakeState, type SupplierFact } from './intake.ts';
-import { emptyProductFactory, markProductReady, restoreProductVersion, setProductAvailability, startProduct, updateProduct, updateProductFiscal, type ProductFactoryState, type UniversalProductSpec } from './product-factory.ts';
+import { emptyProductFactory, markProductReady, refreshProductSupplier, restoreProductVersion, setProductAvailability, startProduct, updateProduct, updateProductFiscal, type ProductFactoryState, type UniversalProductSpec } from './product-factory.ts';
 import type { Availability, ProductFiscal, VariantLogistics } from './product-fiscal.ts';
 import { addMedia, completeTransformation, emptyMedia, enqueueTransformation, ingestSupplierOriginals, studioReadiness, reviewMedia, updateTransformationJob, type MediaAsset, type MediaState, type TransformationJob } from './media-factory.ts';
 import { approvePrice, calculatePrice, emptyPricing, recalculateSupplierCost, releaseQuarantine, type PricingInput, type PricingState } from './pricing.ts';
@@ -180,6 +180,13 @@ export const COMMANDS: Record<string, Handler> = {
     const candidate = s.intake.candidates.find((item) => item.id === str(i, 'candidateId', 80));
     if (!candidate) throw new CommandError('Candidato não encontrado.', 404);
     return startProduct(s.products, candidate, c.newId(), c.at, c.actor);
+  } },
+  'products.refreshSupplier': { writes: 'products', reads: ['intake'], roles: always(['ADMIN', 'SYSTEM']), run: (s, i, c) => {
+    const productId = str(i, 'productId', 80);
+    const product = s.products.products.find(item => item.id === productId);
+    const candidate = s.intake.candidates.find(item => item.id === product?.candidateId);
+    if (!candidate) throw new CommandError('Origem do cadastro não encontrada.', 404);
+    return refreshProductSupplier(s.products, productId, candidate, c.at, c.actor);
   } },
   'products.update': { writes: 'products', reads: [], roles: always([...OPERATE, 'SYSTEM']), run: (s, i, c) => updateProduct(s.products, str(i, 'productId', 80), {
     universalTitle: str(i, 'universalTitle', 300), category: str(i, 'category', 200, false), shortDescription: str(i, 'shortDescription', 1000, false),

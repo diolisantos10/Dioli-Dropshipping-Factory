@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { generateGatewayText, gatewayConfigurationStatus, GATEWAY_CAPABILITIES } from './ai-gateway';
+import { generateGatewayText, gatewayConfigurationStatus, GATEWAY_CAPABILITIES, GatewayError } from './ai-gateway';
 import { runServerCommand } from './command-runner';
 import { productionCandidates, parseCommercialCopy } from './factory-production-rules';
 import { getDatabasePool, readState } from './server-state';
@@ -17,18 +17,18 @@ export const studioCapabilityStatus = () => ({ available: false, code: 'studio_p
   message: 'A produção automática de estúdio ainda precisa concluir a geração e a conferência visual das quatro fotos antes da ativação.' });
 
 async function enrichCandidateImages(correlationId: string) {
-  if (!gatewayConfigurationStatus().configured) return { updated: 0, blocked: 'gateway_not_configured' };
   const intake = ((await readState('intake'))?.payload ?? emptyIntake) as IntakeState;
   const pending = intake.candidates.filter(candidate => candidate.supplier?.images.length && !candidate.supplier.vision?.completed && !['REJEITADO', 'ARQUIVADO'].includes(candidate.status));
-  const results: { candidateId: string; status: string }[] = [];
+  if (pending.length && !gatewayConfigurationStatus().configured) return { checked: 0, failed: 0, remaining: pending.length, blocked: pending.length, reason: 'gateway_not_configured', results: [] };
+  const results: { candidateId: string; status: string; code?: string }[] = [];
   for (const candidate of pending.slice(0, 2)) {
     try {
       const supplier = await readSupplierImages(candidate.supplier!, `candidate:${candidate.id}:supplier:${candidate.supplier!.ref}`, generateGatewayText);
       await runServerCommand('intake.refreshSupplier', { candidateId: candidate.id, supplier }, { ...IDENTITY, correlationId });
       results.push({ candidateId: candidate.id, status: supplier.vision?.completed ? 'SUCCEEDED' : 'CONTINUING' });
-    } catch { results.push({ candidateId: candidate.id, status: 'FAILED' }); }
+    } catch (error) { results.push({ candidateId: candidate.id, status: 'FAILED', code: error instanceof GatewayError ? error.code : 'supplier_vision_invalid_response' }); }
   }
-  return { checked: results.length, remaining: pending.length, results };
+  return { checked: results.length, failed: results.filter(item => item.status === 'FAILED').length, remaining: pending.length - results.filter(item => item.status === 'SUCCEEDED').length, results };
 }
 
 export async function enrichRawCandidates(_actor: string, correlationId: string) {
@@ -37,9 +37,13 @@ export async function enrichRawCandidates(_actor: string, correlationId: string)
   if (!pending.length) return { checked: 0, updated: 0, vision: await enrichCandidateImages(correlationId) };
   const db = await getDatabasePool();
   const rows = (await db.query(`SELECT id FROM integration_configs WHERE provider_key='aliexpress' AND status IN ('TESTED','ACTIVE') ORDER BY status='ACTIVE' DESC,updated_at DESC LIMIT 1`)).rows;
-  if (!rows[0]) return { blocked: pending.length, reason: 'Conecte e teste o AliExpress para completar as fichas antigas.' };
-  const connection = await getSupplierAdapterForIntegration(rows[0].id);
-  if (!connection) return { blocked: pending.length, reason: 'Fornecedor indisponível.' };
+  if (!rows[0]) return { blocked: pending.length, reason: 'Conecte e teste o AliExpress para completar as fichas antigas.', vision: await enrichCandidateImages(correlationId) };
+  let connection;
+  try { connection = await getSupplierAdapterForIntegration(rows[0].id); }
+  catch {
+    return { blocked: pending.length, reason: 'A autenticação do AliExpress falhou. Confira a conexão e reconecte a conta em Integrações.', vision: await enrichCandidateImages(correlationId) };
+  }
+  if (!connection) return { blocked: pending.length, reason: 'Fornecedor indisponível.', vision: await enrichCandidateImages(correlationId) };
   let updated = 0;
   const results: {candidateId:string;status:string}[] = [];
   for (const candidate of pending.slice(0, 10)) {
@@ -80,7 +84,7 @@ export async function runFactoryProduction(_actor: string, correlationId: string
     try {
       // Refresh pre-existing and newly discovered raw candidates against the authenticated supplier.
       const itemId = candidate.supplier?.ref || candidate.url.match(/\/item\/(\d+)\.html/)?.[1];
-      if (itemId && /aliexpress\.com/i.test(candidate.url) && !productId) {
+      if (itemId && /aliexpress\.com/i.test(candidate.url) && !productId && candidate.supplier?.importRevision !== SUPPLIER_IMPORT_REVISION) {
         const suppliers = (await db.query(`SELECT id FROM integration_configs WHERE provider_key='aliexpress' AND status IN ('TESTED','ACTIVE') ORDER BY status='ACTIVE' DESC,updated_at DESC LIMIT 1`)).rows;
         if (suppliers[0]) {
           const connection = await getSupplierAdapterForIntegration(suppliers[0].id);
@@ -97,6 +101,8 @@ export async function runFactoryProduction(_actor: string, correlationId: string
         productId = (started.payload as ProductFactoryState).products.find(product => product.candidateId === candidate.id)!.id;
       }
       let product = (((await readState('products'))?.payload ?? emptyProductFactory) as ProductFactoryState).products.find(item => item.id === productId)!;
+      const refreshed = await runServerCommand('products.refreshSupplier', { productId }, { ...IDENTITY, correlationId });
+      product = (refreshed.payload as ProductFactoryState).products.find(item => item.id === productId)!;
       await runServerCommand('media.archiveSupplierOriginals', { productId }, { ...IDENTITY, correlationId });
       const archive = await persistSupplierOriginals(productId, correlationId);
       const previousDetail = (claimed.rows[0].detail ?? {}) as Record<string, unknown>;

@@ -44,7 +44,7 @@ export function startProduct(state: ProductFactoryState, candidate: Candidate, i
   const supplier=candidate.supplier;
   const description=supplier?.description?.trim()||candidate.notes;
   const technical:ProductTechnical={...structuredClone(emptyTechnical),dimensions:{lengthCm:supplier?.dimensions?.lengthCm??null,widthCm:supplier?.dimensions?.widthCm??null,heightCm:supplier?.dimensions?.heightCm??null},weightGrams:supplier?.weightGrams??null,packageDimensions:{lengthCm:supplier?.packageDimensions?.lengthCm??null,widthCm:supplier?.packageDimensions?.widthCm??null,heightCm:supplier?.packageDimensions?.heightCm??null},packageWeightGrams:supplier?.packageWeightGrams??null,features:supplier?.features??[],specifications:supplier?.specifications??{}};
-  const spec:UniversalProductSpec={...structuredClone(emptyUniversalSpec),technical,sourceUrl:candidate.url,sourceImages:[...new Set([...(supplier?.images??[]),supplier?.imageUrl??''].filter(Boolean))],materials:supplier?.materials??[],variants:(supplier?.variants??[]).map((variant,index)=>({id:`${id}:variant:${index}`,sku:variant.sku,title:variant.label,gtin:'',attributes:variant.attributes??{},dimensions:(supplier?.variants.length??0)<=1?{...technical.dimensions}:{lengthCm:null,widthCm:null,heightCm:null},weightGrams:(supplier?.variants.length??0)<=1?technical.weightGrams:null})),seo:{title:candidate.fullName||candidate.name,description:description.slice(0,160)}};
+  const spec:UniversalProductSpec={...structuredClone(emptyUniversalSpec),technical,sourceUrl:candidate.url,sourceImages:[...new Set([...(supplier?.images??[]),supplier?.imageUrl??''].filter(Boolean))],materials:supplier?.materials??[],variants:(supplier?.variants??[]).map((variant,index)=>({id:`${id}:variant:${index}`,sku:variant.sku,title:variant.label,gtin:'',attributes:variant.attributes??{},dimensions:{lengthCm:variant.dimensions?.lengthCm??((supplier?.variants.length??0)<=1?technical.dimensions.lengthCm:null),widthCm:variant.dimensions?.widthCm??((supplier?.variants.length??0)<=1?technical.dimensions.widthCm:null),heightCm:variant.dimensions?.heightCm??((supplier?.variants.length??0)<=1?technical.dimensions.heightCm:null)},weightGrams:variant.weightGrams??((supplier?.variants.length??0)<=1?technical.weightGrams:null)})),seo:{title:candidate.fullName||candidate.name,description:description.slice(0,160)}};
   const product: MasterProduct = { id, candidateId: candidate.id, status: 'EM_PRODUCAO', version: 1, universalTitle: (candidate.fullName||candidate.name).slice(0,300), shortDescription: description.slice(0,1000), longDescription: description, category: candidate.category||'', bullets: supplier?.features??[], benefits: [], tags: [], spec, createdAt: at, updatedAt: at };
   return { ...state, products: [product, ...state.products], events: [{ id: `${id}:1`, productId: id, action: 'PRODUCAO_INICIADA', at, actor, version: 1 }, ...state.events],versions:[{productId:id,version:1,snapshot:product,at,actor},...(state.versions??[])] };
 }
@@ -55,6 +55,46 @@ export function updateProduct(state: ProductFactoryState, id: string, input: Pic
   const version = current.version + 1;
   const next = { ...current, ...input, spec:input.spec??current.spec??emptyUniversalSpec, universalTitle: input.universalTitle.trim(), shortDescription: input.shortDescription.trim(), longDescription: input.longDescription.trim(), category: input.category.trim(), bullets: clean(input.bullets), benefits: clean(input.benefits), tags: clean(input.tags), version, updatedAt: at };
   return { ...state, products: state.products.map(p => p.id === id ? next : p), events: [{ id: `${id}:${version}`, productId: id, action: 'RASCUNHO_ATUALIZADO', at, actor, version }, ...state.events],versions:[{productId:id,version,snapshot:next,at,actor},...(state.versions??[])] };
+}
+
+// Re-read the persisted candidate after OCR. Fill missing fields only: human edits and
+// completed products remain authoritative, and measurements never cross SKU boundaries.
+export function refreshProductSupplier(state: ProductFactoryState, id: string, candidate: Candidate, at: string, actor: string): ProductFactoryState {
+  const current = state.products.find(product => product.id === id);
+  if (!current || current.candidateId !== candidate.id) throw new Error('Origem do cadastro não encontrada.');
+  if (current.status === 'PRONTO' || !candidate.supplier) return state;
+  const source = startProduct(emptyProductFactory, candidate, id, at, actor).products[0].spec!;
+  const spec = structuredClone(current.spec ?? emptyUniversalSpec);
+  const technical = spec.technical ?? structuredClone(emptyTechnical);
+  const incoming = source.technical!;
+  const fillDimensions = (before: ProductTechnical['dimensions'], after: ProductTechnical['dimensions']) => ({
+    lengthCm: before.lengthCm ?? after.lengthCm, widthCm: before.widthCm ?? after.widthCm, heightCm: before.heightCm ?? after.heightCm,
+  });
+  spec.technical = { ...technical, dimensions: fillDimensions(technical.dimensions, incoming.dimensions),
+    weightGrams: technical.weightGrams ?? incoming.weightGrams,
+    packageDimensions: fillDimensions(technical.packageDimensions, incoming.packageDimensions),
+    packageWeightGrams: technical.packageWeightGrams ?? incoming.packageWeightGrams,
+    specifications: { ...incoming.specifications, ...technical.specifications },
+    features: technical.features.length ? technical.features : incoming.features };
+  spec.materials = spec.materials.length ? spec.materials : source.materials;
+  spec.sourceImages = [...new Set([...(spec.sourceImages ?? []), ...(source.sourceImages ?? [])])];
+  spec.sourceUrl ||= source.sourceUrl;
+  const bySku = new Map(source.variants.map(variant => [variant.sku, variant]));
+  spec.variants = spec.variants.map(variant => {
+    const incomingVariant = bySku.get(variant.sku);
+    return incomingVariant ? { ...variant, dimensions: fillDimensions(variant.dimensions, incomingVariant.dimensions), weightGrams: variant.weightGrams ?? incomingVariant.weightGrams } : variant;
+  });
+  const existingSkus = new Set(spec.variants.map(variant => variant.sku));
+  const existingIds = new Set(spec.variants.map(variant => variant.id));
+  for (const variant of source.variants.filter(variant => !existingSkus.has(variant.sku))) {
+    let variantId = variant.id;
+    while (existingIds.has(variantId)) variantId += ':supplier';
+    existingIds.add(variantId);
+    spec.variants.push({ ...variant, id: variantId });
+  }
+  if (JSON.stringify(spec) === JSON.stringify(current.spec)) return state;
+  return updateProduct(state, id, { universalTitle: current.universalTitle, shortDescription: current.shortDescription,
+    longDescription: current.longDescription, category: current.category, bullets: current.bullets, benefits: current.benefits, tags: current.tags, spec }, at, actor);
 }
 export function markProductReady(state: ProductFactoryState, id: string, at: string, approvedMedia: number, actor = 'Aprovador · controlado'): ProductFactoryState {
   const current = state.products.find(p => p.id === id);

@@ -57,3 +57,15 @@ test('peso geral não é copiado para múltiplas variações de tamanho sem conf
  const product=startProduct(emptyProductFactory,{...approved,supplier},'variants','now').products[0];
  assert.ok(product.spec.variants.every(variant=>variant.weightGrams===null&&variant.dimensions.lengthCm===null));
 });
+
+test('medidas específicas de cada SKU chegam ao cadastro sem herdar dados de outra variação',()=>{
+ const supplier={name:'Loja',ref:'1',cost:20,currency:'BRL',stock:3,imageUrl:'',images:[],weightGrams:999,dimensions:{lengthCm:99,widthCm:99,heightCm:99},variants:[
+  {sku:'P',label:'P',price:20,stock:1,dimensions:{lengthCm:10,widthCm:5,heightCm:2},weightGrams:100},
+  {sku:'G',label:'G',price:30,stock:1,dimensions:{lengthCm:20,widthCm:8}},
+ ]};
+ const product=startProduct(emptyProductFactory,{...approved,supplier},'measured-variants','now').products[0];
+ assert.deepEqual(product.spec.variants[0].dimensions,{lengthCm:10,widthCm:5,heightCm:2});
+ assert.equal(product.spec.variants[0].weightGrams,100);
+ assert.deepEqual(product.spec.variants[1].dimensions,{lengthCm:20,widthCm:8,heightCm:null});
+ assert.equal(product.spec.variants[1].weightGrams,null);
+});

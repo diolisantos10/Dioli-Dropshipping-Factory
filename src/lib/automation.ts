@@ -149,8 +149,9 @@ export async function runAutomation(trigger: string, actor: string, tasks: Autom
     try {
       const detail = await handlers[task](actor, correlationId);
       const children = Array.isArray(detail.results) ? detail.results as {status?:string}[] : [];
-      const blocked = Number(detail.blocked ?? 0) > 0 || children.some(item => item.status === 'BLOCKED');
-      const failures = Number(detail.failed ?? 0) > 0 || children.some(item => item.status === 'FAILED');
+      const vision = 'vision' in detail && detail.vision && typeof detail.vision === 'object' ? detail.vision as { blocked?: number; failed?: number } : {};
+      const blocked = Number(detail.blocked ?? 0) > 0 || Number(vision.blocked ?? 0) > 0 || children.some(item => item.status === 'BLOCKED');
+      const failures = Number(detail.failed ?? 0) > 0 || Number(vision.failed ?? 0) > 0 || children.some(item => item.status === 'FAILED');
       results.push({ task, status: failures ? 'FAILED' : blocked ? 'BLOCKED' : 'SUCCEEDED', durationMs: Date.now() - started, detail });
     }
     catch (error) { results.push({ task, status: 'FAILED', durationMs: Date.now() - started, detail: {}, error: error instanceof Error ? error.message.slice(0, 500) : 'falha desconhecida' }); }
