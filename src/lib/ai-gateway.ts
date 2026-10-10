@@ -113,12 +113,14 @@ async function executeGateway(request: GatewayTextRequest, image = false) {
     const providerFailures: Record<string, string> = { schema_invalido: 'invalid_request', indisponivel: 'unavailable', timeout: 'timeout', politica_provedor: 'access_denied', orcamento_provedor_excedido: 'budget_exceeded' };
     const providerFailure = typeof result.erroNormalizado === 'string' ? providerFailures[result.erroNormalizado] : undefined;
     const upstreamStatus = typeof result.motivo === 'string' ? result.motivo.match(/^OpenAI respondeu HTTP (\d{3})\.$/)?.[1] : undefined;
-    const providerCodes = ['insufficient_quota', 'rate_limit_exceeded', 'invalid_api_key', 'model_not_found', 'model_access_denied', 'invalid_image_url', 'invalid_image', 'unsupported_parameter', 'billing_hard_limit_reached', 'organization_deactivated', 'content_policy_violation'];
+    const providerCodes = ['insufficient_quota', 'credit_balance_exhausted', 'organization_spend_limit_exceeded', 'project_spend_limit_exceeded', 'organization_usage_limit_exceeded', 'rate_limit_exceeded', 'slow_down', 'invalid_api_key', 'model_not_found', 'model_access_denied', 'invalid_image_url', 'invalid_image', 'unsupported_parameter', 'billing_hard_limit_reached', 'organization_deactivated', 'content_policy_violation'];
     const providerCode = typeof result.codigoDoProvedor === 'string' && providerCodes.includes(result.codigoDoProvedor) ? result.codigoDoProvedor : undefined;
     const code = response.status === 401 ? 'gateway_pairing_required' : response.status === 409 ? 'gateway_policy_blocked'
       : response.status === 502 && providerFailure ? `gateway_provider_${providerFailure}${upstreamStatus ? `_http_${upstreamStatus}` : ''}${providerCode ? `_${providerCode}` : ''}`
       : response.status === 422 ? 'gateway_contract_rejected' : 'gateway_execution_failed';
-    throw new GatewayError(code, response.status === 401 ? 'Pareamento da DDF não autorizado na Control Room.'
+    throw new GatewayError(code, providerCode === 'credit_balance_exhausted' ? 'A OpenAI informou saldo pré-pago esgotado na organização associada à chave do cofre central. Confira o crédito nessa mesma organização.'
+      : providerCode && ['organization_spend_limit_exceeded', 'project_spend_limit_exceeded', 'organization_usage_limit_exceeded'].includes(providerCode) ? 'A OpenAI bloqueou a execução por limite de gastos ou uso da organização/projeto associado ao cofre central.'
+      : response.status === 401 ? 'Pareamento da DDF não autorizado na Control Room.'
       : response.status === 409 ? 'Execução bloqueada por perfil, política ou orçamento da Control Room.'
       : 'A Control Room recusou ou não concluiu a execução de IA.', response.status >= 500 || result.tentavelDeNovo === true);
   }

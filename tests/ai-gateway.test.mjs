@@ -43,9 +43,9 @@ test('falha do provedor conserva classificação e HTTP controlados, sem ecoar r
   configure(t);
   t.mock.method(globalThis, 'fetch', async () => Response.json({ ok: false, resultado: { sucesso: false, erroNormalizado: 'orcamento_provedor_excedido', motivo: 'OpenAI respondeu HTTP 429.', private: env.CONTROL_ROOM_SERVICE_TOKEN } }, { status: 502 }));
   await assert.rejects(generateGatewayText(request), error => error.code === 'gateway_provider_budget_exceeded_http_429' && !error.message.includes(env.CONTROL_ROOM_SERVICE_TOKEN));
-  for (const codigoDoProvedor of ['insufficient_quota', env.CONTROL_ROOM_SERVICE_TOKEN]) {
+  for (const codigoDoProvedor of ['insufficient_quota', 'credit_balance_exhausted', env.CONTROL_ROOM_SERVICE_TOKEN]) {
     t.mock.method(globalThis, 'fetch', async () => Response.json({ ok: false, resultado: { sucesso: false, erroNormalizado: 'orcamento_provedor_excedido', motivo: 'OpenAI respondeu HTTP 429.', codigoDoProvedor } }, { status: 502 }));
-    await assert.rejects(generateGatewayText(request), error => error.code === `gateway_provider_budget_exceeded_http_429${codigoDoProvedor === 'insufficient_quota' ? '_insufficient_quota' : ''}` && !JSON.stringify(error).includes(env.CONTROL_ROOM_SERVICE_TOKEN));
+    await assert.rejects(generateGatewayText(request), error => error.code === `gateway_provider_budget_exceeded_http_429${codigoDoProvedor !== env.CONTROL_ROOM_SERVICE_TOKEN ? `_${codigoDoProvedor}` : ''}` && !JSON.stringify(error).includes(env.CONTROL_ROOM_SERVICE_TOKEN) && (codigoDoProvedor !== 'credit_balance_exhausted' || error.message.includes('saldo pré-pago esgotado')));
   }
   t.mock.method(globalThis, 'fetch', async () => Response.json({ ok: false, resultado: { sucesso: false, erroNormalizado: env.CONTROL_ROOM_SERVICE_TOKEN, motivo: env.CONTROL_ROOM_SERVICE_TOKEN } }, { status: 502 }));
   await assert.rejects(generateGatewayText(request), error => error.code === 'gateway_execution_failed' && !error.message.includes(env.CONTROL_ROOM_SERVICE_TOKEN));
