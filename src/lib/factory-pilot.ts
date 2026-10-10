@@ -9,7 +9,7 @@ import { readSupplierImages } from './providers/supplier-vision.ts';
 import { supplierForImageReading } from './providers/supplier-stored.ts';
 import { generateGatewayText, GatewayError } from './ai-gateway';
 import { parseCommercialCopy } from './factory-production-rules';
-import { persistSupplierOriginals } from './supplier-media-archive';
+import { archiveSourceAllowed, persistSupplierOriginals } from './supplier-media-archive';
 import { runStudioProduction } from './studio-worker';
 
 type Connection = { id: string; name: string };
@@ -22,6 +22,16 @@ export function safePilotCode(value: unknown) {
 export function storedStudioFailureCode(error: unknown) {
   if (typeof error !== 'string') return undefined;
   return safePilotCode(error.match(/^Produção não concluída \(([a-z0-9_]+)\); nenhuma foto foi presumida aprovada\.$/)?.[1]);
+}
+export function pilotStudioReferenceSummary(media: MediaState, productId: string) {
+  const request = media.productionRequests?.find(item => item.productId === productId);
+  const referenceIds = new Set(request?.sourceAssetIds ?? []);
+  const approved = media.assets.filter(item => item.productId === productId && referenceIds.has(item.id) && item.kind === 'ORIGINAL' && item.status === 'APROVADA');
+  return { requestReferenceCount: referenceIds.size, availableApprovedCount: approved.length,
+    allowedReferenceCount: approved.filter(item => archiveSourceAllowed(item.sourceUrl ?? item.url)).length,
+    assessmentProcessedCount: new Set(request?.sourceAssessment?.processedSourceAssetIds ?? []).size,
+    assessmentSupportedCount: new Set(request?.sourceAssessment?.supportedSourceAssetIds ?? []).size,
+    assessmentHasVariant: !!request?.sourceAssessment?.variantIdentity?.trim() };
 }
 export function selectPilotSupplier(connections: Connection[], preferred?: string) {
   if (preferred) return connections.find(item => item.name.toLocaleLowerCase() === preferred.toLocaleLowerCase());
@@ -57,16 +67,18 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
   if (prior?.failed && !sourceRetry) {
     let code = safePilotCode(prior.code) ?? prior.studio?.results?.map(item => safePilotCode(item.code)).find(Boolean), approvedPhotos = 0;
     let gaps: string[] = [];
+    let referenceSummary = {};
     if (prior.stage === 'STUDIO' && prior.productId) {
       const media = ((await readState('media'))?.payload ?? emptyMedia) as MediaState;
       const product = (((await readState('products'))?.payload ?? emptyProductFactory) as ProductFactoryState).products.find(item => item.id === prior.productId);
       code = code ?? storedStudioFailureCode(media.productionRequests?.find(item => item.productId === prior.productId)?.error);
       approvedPhotos = approvedStudioAssets(media, prior.productId).length;
+      referenceSummary = pilotStudioReferenceSummary(media, prior.productId);
       gaps = product ? productGaps(product).filter(gap => SAFE_GAPS.has(gap)) : [];
     }
     const summary = { blocked: 1, stage: prior.stage, code: code ?? 'pilot_failed_requires_review', sourceCount: prior.sourceCount ?? 0, sourceRead: prior.sourceRead ?? 0,
-      approvedPhotos, gapCount: gaps.length, gaps, reason: 'pilot_failed_requires_review' };
-    console.info('DDF_FACTORY_PILOT', JSON.stringify({ status: 'BLOCKED', stage: summary.stage, code: summary.code, sourceCount: summary.sourceCount, sourceRead: summary.sourceRead, approvedPhotos, gapCount: gaps.length, gaps }));
+      approvedPhotos, gapCount: gaps.length, gaps, ...referenceSummary, reason: 'pilot_failed_requires_review' };
+    console.info('DDF_FACTORY_PILOT', JSON.stringify({ status: 'BLOCKED', stage: summary.stage, code: summary.code, sourceCount: summary.sourceCount, sourceRead: summary.sourceRead, approvedPhotos, gapCount: gaps.length, gaps, ...referenceSummary }));
     return summary;
   }
   const checkpoint: PilotCheckpoint = { ...prior };

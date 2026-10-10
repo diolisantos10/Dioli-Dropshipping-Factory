@@ -30,6 +30,26 @@ test('single-product studio target leaves unrelated pending and stale paid reque
  assert.equal(requests[1].status,'PROCESSANDO');
 });
 
+test('fully inspected gallery without angle support stops before generation with precise unsupported-view code',async t=>{
+ const old=process.env.DDF_PUBLIC_URL;process.env.DDF_PUBLIC_URL='https://ddf.example';t.after(()=>{if(old===undefined)delete process.env.DDF_PUBLIC_URL;else process.env.DDF_PUBLIC_URL=old;});
+ let media=mediaRules.ingestSupplierOriginals(structuredClone(mediaRules.emptyMedia),'pilot',['https://ae01.alicdn.com/a.png'],'Supplier','2026-10-09T00:00:00Z');
+ const id=media.assets[0].id;
+ media.productionRequests=[{id:'r',productId:'pilot',status:'PENDENTE',updatedAt:'2026-10-09T00:00:00Z',sourceAssetIds:[id],sourceAssessment:{angle:'frontal',variantIdentity:'preto',processedSourceAssetIds:[id],supportedSourceAssetIds:[],evidence:['Ângulo não disponível']}}];
+ const connection={query:async()=>({rows:[{acquired:true}]}),release:()=>{}};
+ const deps={
+ './server-state':{getDatabasePool:async()=>({connect:async()=>connection}),readState:async domain=>({payload:domain==='media'?media:{products:[{id:'pilot',status:'EM_PRODUCAO',universalTitle:'Óculos'}]}})},
+ './command-runner':{runServerCommand:async(_type,input)=>{media=updateMediaProductionRequest(media,input.requestId,input.status,new Date().toISOString(),input.error);return{payload:media};}},
+ './media-factory':mediaRules,'./product-factory':{},'./supplier-media-archive':archiveModule.exports,
+ './ai-gateway':{GatewayError,gatewayConfigurationStatus:()=>({configured:true})},
+ './studio-gateway':{STUDIO_ANGLES:['frontal'],assessStudioSourceBatch:async()=>assert.fail('Checkpointed sources cannot be reread'),generateReviewedStudioImage:async()=>assert.fail('Unseen angle cannot be generated')},
+ };
+ const code=ts.transpileModule(readFileSync(new URL('../src/lib/studio-worker.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ const workerModule={exports:{}};
+ new Script(`(function(require,module,exports){${code}\n})`).runInThisContext()(name=>name.startsWith('node:')?require(name):deps[name],workerModule,workerModule.exports);
+ const result=await workerModule.exports.runStudioProduction('pilot',['pilot']);
+ assert.equal(result.failed,1);assert.equal(result.results[0].code,'studio_unsupported_view');assert.equal(media.productionRequests[0].status,'FALHOU');
+});
+
 test('worker real limita concorrência, preserva originais e não gera produto arquivado',async t=>{
  const old=process.env.DDF_PUBLIC_URL;process.env.DDF_PUBLIC_URL='https://ddf.example';t.after(()=>{if(old===undefined)delete process.env.DDF_PUBLIC_URL;else process.env.DDF_PUBLIC_URL=old;});
  let media=structuredClone(mediaRules.emptyMedia);

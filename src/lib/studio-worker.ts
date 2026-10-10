@@ -63,6 +63,7 @@ export async function runStudioProduction(correlationId: string, targetProductId
         return { checked: 1, inspecting: 1, inspected: processed.size, remainingSources: sources.length - processed.size };
       }
       const selectedSources = sources.filter(source => supported.has(source!.id)).slice(0, 5);
+      if (!selectedSources.length) throw new GatewayError('studio_unsupported_view', 'Nenhuma foto original comprova o ângulo solicitado na mesma variante; geração não executada.');
       const references = selectedSources.map(source => source!.sourceUrl ?? source!.url);
       const result = await generateReviewedStudioImage({ productId: product.id, title: product.universalTitle, angle, references, correlationId,
         variantIdentity, sourceVerified: true });

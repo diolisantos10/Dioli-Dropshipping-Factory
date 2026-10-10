@@ -142,3 +142,15 @@ test('stored failed studio reveals only its safe code and technical gap labels w
   assert.equal(fx.calls, 0); assert.ok(logs.every(line => !line.includes('PRIVATE')));
   assert.equal(load({}).storedStudioFailureCode('Produção não concluída (secret_value); nenhuma foto foi presumida aprovada.'), undefined);
 });
+
+test('studio reference aggregates distinguish missing source assets from fully inspected unsupported angles without exposing identity', () => {
+  const pilot = load({ './supplier-media-archive': { archiveSourceAllowed: value => value.startsWith('https://ae01.alicdn.com/') } });
+  const media = { assets: [
+    { id: 'a', productId: 'pilot', kind: 'ORIGINAL', status: 'APROVADA', sourceUrl: 'https://ae01.alicdn.com/a.jpg', url: 'https://ddf.example/api/media?id=a' },
+    { id: 'b', productId: 'pilot', kind: 'ORIGINAL', status: 'APROVADA', url: 'https://untrusted.example/b.jpg' },
+    { id: 'c', productId: 'other', kind: 'ORIGINAL', status: 'APROVADA', url: 'https://ae01.alicdn.com/c.jpg' },
+  ], productionRequests: [{ productId: 'pilot', sourceAssetIds: ['a', 'b', 'missing'], sourceAssessment: { processedSourceAssetIds: ['a', 'b', 'missing'], supportedSourceAssetIds: [], variantIdentity: 'PRIVATE VARIANT' } }] };
+  const result = pilot.pilotStudioReferenceSummary(media, 'pilot');
+  assert.deepEqual(result, { requestReferenceCount: 3, availableApprovedCount: 2, allowedReferenceCount: 1, assessmentProcessedCount: 3, assessmentSupportedCount: 0, assessmentHasVariant: true });
+  assert.ok(!JSON.stringify(result).includes('PRIVATE'));
+});
