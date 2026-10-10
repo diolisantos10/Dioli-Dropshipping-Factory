@@ -64,10 +64,10 @@ export function supplierMeasurements(text: string, source: SupplierFact['source'
     const weight = /peso|weight/.test(label);
     const factor = weight ? (unit === 'kg' ? 1000 : /^(g|grams?|gramas?)$/.test(unit) ? 1 : null)
       : unit === 'mm' ? 0.1 : unit === 'cm' ? 1 : /^(m|metros?)$/.test(unit) ? 100 : /^(in|inch|inches|polegadas?)$/.test(unit) ? 2.54 : null;
-    // Packaging measurements must stay in packaging fields, not product fields.
+    // Packaging and component measurements stay in the original specifications, never overall product fields.
     const lineStart = text.lastIndexOf('\n', match.index) + 1;
     const prefix = text.slice(lineStart, match.index).slice(-120);
-    if (factor === null || value <= 0 || /package|packaging|embalagem|shipping|gross|bruto/i.test(prefix)) continue;
+    if (factor === null || value <= 0 || /package|packaging|embalagem|shipping|gross|bruto|\blens(?:es)?\b|\blente(?:s)?\b|\btemple(?:s)?\b|\bhaste(?:s)?\b|\bbridge\b|\bponte\b/i.test(prefix)) continue;
     facts.push({ field: weight ? 'weightGrams' : names[label], value: Number((value * factor).toFixed(6)), unit: weight ? 'g' : 'cm',
       source, ...(sku ? { sku } : {}), excerpt: match[0] });
   }

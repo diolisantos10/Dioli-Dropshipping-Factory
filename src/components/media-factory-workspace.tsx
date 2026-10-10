@@ -1,42 +1,65 @@
 'use client';
 /* eslint-disable @next/next/no-img-element -- URLs are user-controlled reviewed assets; optimization hosts are intentionally unknown. */
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { emptyMedia, studioReadiness, MEDIA_STORAGE_KEY, type MediaAsset, type MediaState } from '@/lib/media-factory';
+import {useServerStates} from '@/components/use-server-states';
+import {ProductListFilters,filterOptions} from '@/components/product-list-filters';
+import {emptyProductFilters,matchesProductFilters,type ProductFilters} from '@/lib/product-filters';
+import { studioReadiness, type MediaAsset, type MediaState } from '@/lib/media-factory';
 import { command, errorMessage, sendCommand, type Command } from '@/lib/command-client';
-import { emptyProductFactory, PRODUCT_STORAGE_KEY, type ProductFactoryState } from '@/lib/product-factory';
+import {  type ProductFactoryState } from '@/lib/product-factory';
 
-const eventName = 'ddf-media-change';
-function subscribe(cb: () => void) { window.addEventListener('storage', cb); window.addEventListener(eventName, cb); return () => { window.removeEventListener('storage', cb); window.removeEventListener(eventName, cb); }; }
-function snapshot() { try { return `${localStorage.getItem(PRODUCT_STORAGE_KEY) ?? ''}\n${localStorage.getItem(MEDIA_STORAGE_KEY) ?? ''}`; } catch { return 'unavailable'; } }
-
+const NAMESPACES = ['products', 'media', 'intake'] as const;
 export function MediaFactoryWorkspace() {
-  const raw = useSyncExternalStore(subscribe, snapshot, () => null);
-  let products: ProductFactoryState = emptyProductFactory; let media: MediaState = emptyMedia; let loadError = '';
-  try { if (raw) { const [p, m] = raw.split('\n'); products = p ? JSON.parse(p) : emptyProductFactory; media = m ? JSON.parse(m) : emptyMedia; if (!Array.isArray(products.products) || !Array.isArray(media.assets)) throw new Error(); } } catch { loadError = 'Dados locais inválidos; edição bloqueada.'; }
+  const {states,status,fromCache,error:loadError,reload}=useServerStates(NAMESPACES);
+  const products=states.products; const media=states.media;
+  const [filters,setFilters]=useState<ProductFilters>(emptyProductFilters); const [selected,setSelected]=useState<Set<string>>(new Set()); const [bulkBusy,setBulkBusy]=useState(false); const [queueStatus,setQueueStatus]=useState('');
+  const updateFilters=(patch:Partial<ProductFilters>)=>{setFilters(current=>({...current,...patch}));setSelected(new Set());};
+  const candidates=new Map(states.intake.candidates.map(candidate=>[candidate.id,candidate]));
+  const visibleProducts=products.products.filter(product=>matchesProductFilters(product,candidates.get(product.candidateId),filters,studioReadiness(media,product.id).approvedCount)&&(!queueStatus||(media.productionRequests?.find(request=>request.productId===product.id)?.status??'SEM_SOLICITACAO')===queueStatus));
+  const visibleIds=new Set(visibleProducts.map(product=>product.id));
+  const filteredProducts={...products,products:visibleProducts};
+  const selectedProducts=visibleProducts.filter(product=>selected.has(product.id));
+  const allSelected=visibleProducts.length>0&&selectedProducts.length===visibleProducts.length;
+  const selectedCommercial=media.assets.filter(asset=>selected.has(asset.productId)&&visibleIds.has(asset.productId)&&asset.kind==='DERIVADA'&&asset.status!=='REJEITADA');
+  const reviewable=selectedCommercial.filter(asset=>asset.status==='EM_REVISAO');
+  const archivable=selectedProducts.filter(product=>product.status==='EM_PRODUCAO'&&!product.archivedAt);
+  async function approveSelected() {if(bulkBusy||!reviewable.length)return;setBulkBusy(true);setError('');let done=0;try{for(const asset of reviewable){await sendCommand(command('media.review',{assetId:asset.id,status:'APROVADA'}));done++;}setMessage(`${done} mídia(s) aprovada(s) após as validações de direitos e fidelidade.`);}catch(value){setError(`${done} mídia(s) já aprovada(s). ${errorMessage(value)}`);}finally{setBulkBusy(false);reload();}}
+  async function removeSelected(archive:boolean) {const ids=archive?archivable.map(product=>product.id):selectedCommercial.map(asset=>asset.id);if(bulkBusy||!ids.length)return;const reason=window.prompt(archive?'Motivo para arquivar os produtos selecionados:':'Motivo para remover as mídias comerciais selecionadas:');if(!reason?.trim())return;if(!window.confirm(archive?`Arquivar ${ids.length} produto(s)? Os dados e originais serão preservados.`:`Retirar ${ids.length} mídia(s) do catálogo comercial? O histórico e os originais serão preservados.`))return;setBulkBusy(true);setError('');let done=0;try{for(let i=0;i<ids.length;i+=200){const batch=ids.slice(i,i+200);await sendCommand(command(archive?'products.bulkArchive':'media.bulkRemoveCommercialAssets',{[archive?'productIds':'assetIds']:batch,reason:reason.trim()}));done+=batch.length;}setMessage(`${done} ${archive?'produto(s) arquivado(s)':'mídia(s) retirada(s) do catálogo comercial'}.`);setSelected(new Set());}catch(value){setError(`${done} item(ns) concluído(s). ${errorMessage(value)}`);}finally{setBulkBusy(false);reload();}}
+
+  const toggle=(id:string)=>setSelected(current=>{const next=new Set(current);if(next.has(id))next.delete(id);else next.add(id);return next;});
+  async function bulk(type:'media.bulkSendToMedia'|'products.bulkRequestCompletion') {
+    const ids=selectedProducts.filter(product=>product.status==='EM_PRODUCAO').map(product=>product.id); if(!ids.length||bulkBusy)return;
+    setBulkBusy(true);setError('');let sent=0;
+    try { for(let i=0;i<ids.length;i+=200){await sendCommand(command(type,{productIds:ids.slice(i,i+200)}));sent+=ids.slice(i,i+200).length;}setMessage(`${sent} produto(s) delegado(s) aos agentes. Pendências permanecem visíveis.`);setSelected(new Set()); }
+    catch(value){setError(`${sent} produto(s) já enviado(s). ${errorMessage(value)}`);}finally{setBulkBusy(false);reload();}
+  }
   const [error, setError] = useState(''); const [message, setMessage] = useState('');
-  function act(cmd: Command, text: string) { sendCommand(cmd).then(() => { setError(''); setMessage(text); }, value => setError(errorMessage(value, 'Não foi possível salvar.'))); }
+  function act(cmd: Command, text: string) { sendCommand(cmd).then(() => { setError(''); setMessage(text); reload(); }, value => setError(errorMessage(value, 'Não foi possível salvar.'))); }
   const originals = media.assets.filter(asset => asset.kind === 'ORIGINAL');
   return <div className="space-y-6">
     <header><p className="eyebrow">Produção / ativos comerciais</p><h1 className="display-title">Media Factory</h1><p className="lede">Produção automática de fotos de estúdio a partir das referências preservadas do fornecedor.</p></header>
     <p className="surface p-4 text-sm">O catálogo recebe no mínimo quatro fotos de estúdio em ângulos distintos, com fundo neutro e fidelidade verificada. Originais ficam arquivados separadamente. Se faltarem referências ou geração configurada, o produto permanece bloqueado e o motivo aparece aqui.</p>
     {(error || loadError) && <p role="alert" className="border border-red-300 bg-red-50 p-4 text-red-800">{error || loadError}</p>}<p role="status" className="text-sm text-green-800">{message}</p>
-    <MediaDepartment products={products} />
+    <ProductListFilters filters={filters} onChange={updateFilters} categories={filterOptions(products.products.map(product=>product.category))} suppliers={filterOptions(states.intake.candidates.map(candidate=>candidate.supplier?.name))}/>
+    <section className="surface flex flex-wrap items-center gap-3 p-4"><label>Fila de mídia<select className="ddf-input" value={queueStatus} onChange={e=>{setQueueStatus(e.target.value);setSelected(new Set());}}><option value="">Todos os estados</option>{['SEM_SOLICITACAO','PENDENTE','PROCESSANDO','CONCLUIDO','BLOQUEADO','FALHOU'].map(value=><option key={value}>{value}</option>)}</select></label><label className="flex items-center gap-2"><input type="checkbox" checked={allSelected} disabled={bulkBusy||!visibleProducts.length} onChange={()=>setSelected(allSelected?new Set():new Set(visibleProducts.map(product=>product.id)))}/>Selecionar todos no filtro ({visibleProducts.length})</label><span>{selectedProducts.length} selecionado(s)</span><button className="ddf-button" disabled={bulkBusy||!selectedProducts.some(product=>product.status==='EM_PRODUCAO')} onClick={()=>bulk('media.bulkSendToMedia')}>Produzir / tentar mídia novamente</button><button className="ddf-button secondary" disabled={bulkBusy||!selectedProducts.some(product=>product.status==='EM_PRODUCAO')} onClick={()=>bulk('products.bulkRequestCompletion')}>Delegar cadastro</button><button className="ddf-button" disabled={bulkBusy||!reviewable.length} onClick={approveSelected}>Aprovar mídias em revisão ({reviewable.length})</button><button className="ddf-button secondary" disabled={bulkBusy||!selectedCommercial.length} onClick={()=>removeSelected(false)}>Remover mídias comerciais ({selectedCommercial.length})</button><button className="ddf-button secondary" disabled={bulkBusy||!archivable.length} onClick={()=>removeSelected(true)}>Arquivar produtos ({archivable.length})</button><button className="ddf-button secondary" onClick={()=>{setFilters(emptyProductFilters);setQueueStatus('');setSelected(new Set());}}>Limpar filtros</button></section>
+    {status!=='ready'&&!fromCache&&<p>Carregando produtos do servidor…</p>}
+    <MediaDepartment products={filteredProducts} />
     <section className="surface p-5"><h2 className="text-xl font-semibold">Modelos reais para roupas</h2><p className="my-2 text-sm">Pastas individuais com fotos neutras, altura, peso e medidas do corpo para composições de vestuário com IA.</p><Link href="/modelos" className="ddf-button inline-block">Abrir catálogo de modelos</Link></section>
-    <StudioProgress products={products} media={media} />
+    <StudioProgress products={filteredProducts} media={media} selected={selected} onToggle={toggle} busy={bulkBusy} />
     <details className="surface p-4"><summary className="cursor-pointer font-semibold">Referências e ferramentas auxiliares</summary><div className="mt-4 space-y-4">
     {!loadError && <MediaUploadForm products={products} onStored={asset => act(command('media.addAsset', { asset }), 'Upload armazenado com direitos e checksum; aguardando revisão.')} />}
     {!loadError && <AssetReferenceForm products={products} originals={originals} onAdd={asset => act(command('media.addAsset', { asset }), 'Ativo versionado e enviado para revisão.')} />}
-    {!loadError && <TransformationQueue state={media} onAct={act} />}
+    {!loadError && <TransformationQueue state={{...media,jobs:media.jobs?.filter(job=>visibleIds.has(job.productId))}} onAct={act} />}
     </div></details>
-    <AssetList assets={media.assets.filter(asset => asset.kind === 'DERIVADA')} title="Fotos comerciais de estúdio e derivados" products={products} onReview={(id,status) => act(command('media.review', { assetId: id, status }), status === 'APROVADA' ? 'Mídia aprovada.' : 'Mídia rejeitada e preservada no histórico.')} references={media.assets} />
+    <AssetList assets={media.assets.filter(asset => asset.kind === 'DERIVADA'&&visibleIds.has(asset.productId))} title="Fotos comerciais de estúdio e derivados" products={products} onReview={(id,status) => act(command('media.review', { assetId: id, status }), status === 'APROVADA' ? 'Mídia aprovada.' : 'Mídia rejeitada e preservada no histórico.')} references={media.assets} />
     <details className="surface p-4"><summary className="cursor-pointer font-semibold">Arquivo de originais do fornecedor ({originals.length})</summary><div className="mt-4">
-    <AssetList assets={originals} title="Originais preservados — fora do catálogo comercial" products={products} onReview={(id,status) => act(command('media.review', { assetId: id, status }), status === 'APROVADA' ? 'Mídia aprovada.' : 'Mídia rejeitada e preservada no histórico.')} />
+    <AssetList assets={originals.filter(asset=>visibleIds.has(asset.productId))} title="Originais preservados — fora do catálogo comercial" products={products} onReview={(id,status) => act(command('media.review', { assetId: id, status }), status === 'APROVADA' ? 'Mídia aprovada.' : 'Mídia rejeitada e preservada no histórico.')} />
     </div></details>
   </div>;
 }
 
-function StudioProgress({products,media}:{products:ProductFactoryState;media:MediaState}) { return <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-4">{products.products.map(product=>{const readiness=studioReadiness(media,product.id);const originals=media.assets.filter(asset=>asset.productId===product.id&&asset.kind==='ORIGINAL');return <article key={product.id} className="surface p-4 space-y-2"><h2 className="font-semibold">{product.universalTitle}</h2><p className="text-sm">{readiness.ready?'Estúdio concluído':'Aguardando produção de estúdio'} · {readiness.approvedCount}/{readiness.requiredCount} fotos</p><p className="text-xs text-gray-600">{originals.length} originais preservados</p>{readiness.reasons.map(reason=><p key={reason} className="text-xs text-amber-800">{reason}</p>)}</article>})}{!products.products.length&&<p className="surface p-4 text-sm">Os produtos entram aqui automaticamente após a autorização de produção na Triagem.</p>}</section>; }
+function StudioProgress({products,media,selected,onToggle,busy}:{products:ProductFactoryState;media:MediaState;selected:Set<string>;onToggle:(id:string)=>void;busy:boolean}) { return <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-4">{products.products.map(product=>{const readiness=studioReadiness(media,product.id);const originals=media.assets.filter(asset=>asset.productId===product.id&&asset.kind==='ORIGINAL');return <article key={product.id} className="surface p-4 space-y-2"><label className="flex items-center gap-2"><input type="checkbox" checked={selected.has(product.id)} disabled={busy} onChange={()=>onToggle(product.id)} aria-label={`Selecionar ${product.universalTitle}`}/><h2 className="font-semibold">{product.universalTitle}</h2></label><p className="text-sm">{readiness.ready?'Estúdio concluído':'Aguardando produção de estúdio'} · {readiness.approvedCount}/{readiness.requiredCount} fotos</p><p className="text-xs text-gray-600">{originals.length} originais preservados</p>{media.productionRequests?.filter(request=>request.productId===product.id).map(request=><p key={request.id} className="text-xs">Fila: {request.status}{request.error?` · ${request.error}`:''}</p>)}{readiness.reasons.map(reason=><p key={reason} className="text-xs text-amber-800">{reason}</p>)}</article>})}{!products.products.length&&<p className="surface p-4 text-sm">Os produtos entram aqui automaticamente após a autorização de produção na Triagem.</p>}</section>; }
 
 type DepartmentStatus = { gatewayStatus?: {configured:boolean;message:string}; studioStatus?: {available:boolean;message:string}; runs?: {candidateId:string;productId?:string;status:string;stage:string;detail?:{blocks?:string[];technicalGaps?:string[];studio?:{approvedCount:number;requiredCount:number}};attempts:number;updatedAt:string}[] };
 function MediaDepartment({products}:{products:ProductFactoryState}) {
@@ -53,7 +76,7 @@ function MediaDepartment({products}:{products:ProductFactoryState}) {
     ].map(([title,text])=><article key={title} className="rounded border border-stone-200 p-3"><h3 className="font-semibold text-sm">{title}</h3><p className="mt-2 text-xs text-gray-600">{text}</p></article>)}</div>
     <p className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">A conexão de IA central precisa oferecer edição com imagens de referência e análise visual de fidelidade. Geração apenas por texto não libera produtos para o catálogo.</p>
     {error&&<p role="alert" className="text-sm text-red-800">{error}</p>}{notice&&<p role="status" className="text-sm">{notice}</p>}
-    {status&&<div className="space-y-3"><p className="text-sm"><strong>Conexão de IA:</strong> {status.gatewayStatus?.message??'Conexão configurada'}</p><p className="text-sm"><strong>Estúdio:</strong> {status.studioStatus?.message??'Estado não informado'}</p>{status.runs?.map(run=><article key={run.candidateId} className="rounded border border-stone-200 p-3 text-sm"><h3 className="font-semibold">{products.products.find(product=>product.id===run.productId)?.universalTitle??'Produto em preparação'}</h3><p>{run.status==='BLOCKED'?'Produção bloqueada':run.status==='READY'?'Produção concluída':run.status==='FAILED'?'Falha na produção':run.status==='PROCESSING'?'Produção em andamento':'Aguardando processamento'}</p>{run.detail?.studio&&<p>Estúdio: {run.detail.studio.approvedCount}/{run.detail.studio.requiredCount} fotos aprovadas</p>}{[...(run.detail?.blocks??[]),...(run.detail?.technicalGaps??[])].map((reason,index)=><p key={index} className="mt-1 text-amber-900">{reason}</p>)}</article>)}</div>}
+    {status&&<div className="space-y-3"><p className="text-sm"><strong>Conexão de IA:</strong> {status.gatewayStatus?.message??'Conexão configurada'}</p><p className="text-sm"><strong>Estúdio:</strong> {status.studioStatus?.message??'Estado não informado'}</p>{status.runs?.filter(run=>products.products.some(product=>product.id===run.productId)).map(run=><article key={run.candidateId} className="rounded border border-stone-200 p-3 text-sm"><h3 className="font-semibold">{products.products.find(product=>product.id===run.productId)?.universalTitle??'Produto em preparação'}</h3><p>{run.status==='BLOCKED'?'Produção bloqueada':run.status==='READY'?'Produção concluída':run.status==='FAILED'?'Falha na produção':run.status==='PROCESSING'?'Produção em andamento':'Aguardando processamento'}</p>{run.detail?.studio&&<p>Estúdio: {run.detail.studio.approvedCount}/{run.detail.studio.requiredCount} fotos aprovadas</p>}{[...(run.detail?.blocks??[]),...(run.detail?.technicalGaps??[])].map((reason,index)=><p key={index} className="mt-1 text-amber-900">{reason}</p>)}</article>)}</div>}
   </section>;
 }
 

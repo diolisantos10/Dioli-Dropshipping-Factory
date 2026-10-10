@@ -6,6 +6,7 @@ import { Script } from 'node:vm';
 import ts from 'typescript';
 import { readSupplierImages } from '../src/lib/providers/supplier-vision.ts';
 import { GatewayError } from '../src/lib/ai-gateway.ts';
+import { isEyewearProduct } from '../src/lib/product-filters.ts';
 import { supplierForImageReading } from '../src/lib/providers/supplier-stored.ts';
 
 const require = createRequire(import.meta.url);
@@ -20,8 +21,9 @@ function worker(generate, legacy = false) {
   const deps = {
     './ai-gateway': { GatewayError, gatewayConfigurationStatus: () => ({ configured: true }), generateGatewayText: generate },
     './command-runner': { runServerCommand: async (type, input) => { writes.push({ type, input }); return { payload: { candidates: [candidate] } }; } },
-    './server-state': { readState: async () => ({ payload: { candidates: [candidate] } }), getDatabasePool: async () => ({ query: async () => ({ rows: [{ id: 'integration-1' }] }) }) },
-    './integrations': { getSupplierAdapterForIntegration: async () => { throw new Error('AliExpress IllegalRefreshToken'); } },
+    './server-state': { readState: async namespace => ({ payload: namespace === 'intake' ? { candidates: [candidate] } : { products: [] } }), getDatabasePool: async () => ({ query: async () => ({ rows: [{ id: 'wrong-integration', name: 'Outra marca' }, { id: 'integration-1', name: 'Loja' }] }) }) },
+    './product-filters.ts': { isEyewearProduct },
+    './integrations': { getSupplierAdapterForIntegration: async id => { assert.equal(id, 'integration-1'); throw new Error('AliExpress IllegalRefreshToken'); } },
     './providers/supplier-content.ts': { SUPPLIER_IMPORT_REVISION: 2 },
     './providers/supplier-vision.ts': { readSupplierImages },
     './providers/supplier-stored.ts': { supplierForImageReading },
@@ -40,6 +42,7 @@ test('renovação recusada pelo AliExpress não interrompe OCR das fotos importa
   });
   const result = await enrich('system', 'correlation');
   assert.equal(result.blocked, 1);
+  assert.equal(result.results[0].code, 'supplier_reconnect_required');
   assert.match(result.reason, /reconecte/);
   assert.equal(result.vision.results[0].status, 'SUCCEEDED');
   assert.equal(writes[0].type, 'intake.refreshSupplier');

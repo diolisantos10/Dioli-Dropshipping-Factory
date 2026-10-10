@@ -15,7 +15,7 @@ export class GatewayError extends Error {
   }
 }
 
-type WorkClass = 'routine' | 'technical_execution' | 'source_grounded_research' | 'creative_multimodal';
+type WorkClass = 'routine' | 'technical_execution' | 'source_grounded_research' | 'creative_multimodal' | 'image_editing' | 'visual_review';
 export type GatewayTextRequest = {
   roleAddress: string;
   system: string;
@@ -23,6 +23,7 @@ export type GatewayTextRequest = {
   payloadRef: string;
   correlationId?: string;
   maxTokens?: number;
+  timeoutMs?: number;
   workClass?: WorkClass;
   referenceImages?: string[];
 };
@@ -68,30 +69,36 @@ export function gatewayConfigurationStatus() {
   }
 }
 
-export async function generateGatewayText(request: GatewayTextRequest): Promise<GatewayTextResult> {
+export const MAX_INLINE_REFERENCE = 14_000_000;
+export function validGatewayReference(raw: string) {
+  if (/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(raw)) return raw.length <= MAX_INLINE_REFERENCE;
+  try { const url = new URL(raw); return url.protocol === 'https:' && !url.username && !url.password && raw.length <= 4096; } catch { return false; }
+}
+
+async function executeGateway(request: GatewayTextRequest, image = false) {
   const config = configuration();
   if (!/^dioli\.[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(request.roleAddress) || !request.payloadRef.trim() || !request.system.trim() || !request.prompt.trim()) {
     throw new GatewayError('gateway_invalid_request', 'Papel, referência e mensagens são obrigatórios e precisam ser válidos.');
   }
   const maxTokens = request.maxTokens ?? 4096;
   const referenceImages = request.referenceImages ?? [];
-  if (referenceImages.length > 16 || referenceImages.some(raw => {
-    try { const url = new URL(raw); return url.protocol !== 'https:' || Boolean(url.username || url.password) || raw.length > 4096; } catch { return true; }
-  })) throw new GatewayError('gateway_invalid_request', 'A análise aceita até 16 referências HTTPS sem credenciais.');
+  if (referenceImages.length > 16 || referenceImages.some(raw => !validGatewayReference(raw)) || referenceImages.reduce((sum, raw) => sum + raw.length, 0) > 24_000_000) throw new GatewayError('gateway_invalid_request', 'Referências de imagem inválidas ou acima do limite.');
   if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 32_000) throw new GatewayError('gateway_invalid_request', 'Limite de tokens inválido.');
+  const timeoutMs = request.timeoutMs ?? (image ? 200_000 : 90_000);
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 200_000) throw new GatewayError('gateway_invalid_request', 'Timeout do gateway inválido.');
   let response: Response;
   try {
     response = await fetch(config.url, {
       method: 'POST', cache: 'no-store',
       headers: { 'content-type': 'application/json', 'X-Service-Token': config.token },
-      signal: AbortSignal.timeout(90_000),
+      signal: AbortSignal.timeout(timeoutMs),
       body: JSON.stringify({
-        roleAddress: request.roleAddress, workClass: request.workClass ?? 'technical_execution', modalidade: referenceImages.length ? 'vision' : 'text',
+        roleAddress: request.roleAddress, workClass: request.workClass ?? (image ? 'image_editing' : 'technical_execution'), modalidade: image ? 'image' : referenceImages.length ? 'vision' : 'text',
         centroCustoId: config.costCenterId,
         escopo: { holdingId: config.holdingId, productId: process.env.CONTROL_ROOM_PRODUCT_ID ?? 'ddf', roleAddress: request.roleAddress },
         ambiente: config.environment, payloadRef: request.payloadRef, classificacaoDados: 'internal', solicitadoPor: 'ddf-automation',
         correlacaoId: request.correlationId,
-        mensagens: [{ role: 'system', content: request.system }, { role: 'user', content: request.prompt }], maxTokens,
+        ...(image ? { prompt: `${request.system}\n${request.prompt}`, n: 1 } : { mensagens: [{ role: 'system', content: request.system }, { role: 'user', content: request.prompt }], maxTokens }),
         ...(referenceImages.length ? { imagensReferencia: referenceImages } : {}),
       }),
     });
@@ -109,6 +116,11 @@ export async function generateGatewayText(request: GatewayTextRequest): Promise<
       : response.status === 409 ? 'Execução bloqueada por perfil, política ou orçamento da Control Room.'
       : 'A Control Room recusou ou não concluiu a execução de IA.', response.status >= 500 || result.tentavelDeNovo === true);
   }
+  return { body, result };
+}
+
+export async function generateGatewayText(request: GatewayTextRequest): Promise<GatewayTextResult> {
+  const { body, result } = await executeGateway(request);
   if (typeof result.conteudo !== 'string' || !result.conteudo.trim() || typeof body.provedorId !== 'string'
     || typeof body.modeloId !== 'string' || !['primario', 'fallback'].includes(String(body.tier))) {
     throw new GatewayError('gateway_invalid_response', 'A Control Room devolveu uma resposta incompatível com o contrato de texto.');
@@ -117,4 +129,19 @@ export async function generateGatewayText(request: GatewayTextRequest): Promise<
   return { text: result.conteudo, providerId: body.provedorId, modelId: body.modeloId,
     tier: body.tier as 'primario' | 'fallback',
     provenance: Object.fromEntries(Object.entries(provenance).filter(([key]) => !/credential|token|secret|key/i.test(key))) };
+}
+
+export type GatewayImageResult = { base64: string; mimeType: 'image/png'; providerId: string; modelId: string; generationId: string };
+export async function generateGatewayImage(request: GatewayTextRequest): Promise<GatewayImageResult> {
+  if (!request.referenceImages?.length) throw new GatewayError('gateway_invalid_request', 'Foto comercial exige referências originais.');
+  const { body, result } = await executeGateway(request, true);
+  const images = result.conteudo;
+  const first = Array.isArray(images) && images.length === 1 ? images[0] : null;
+  if (!first || typeof first.b64_json !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(first.b64_json) || first.b64_json.length > 13_333_336
+    || typeof body.provedorId !== 'string' || typeof body.modeloId !== 'string') throw new GatewayError('gateway_invalid_response', 'Gateway não devolveu uma imagem PNG válida no limite de 10 MB.');
+  const bytes = Buffer.from(first.b64_json, 'base64');
+  if (!bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) throw new GatewayError('gateway_invalid_response', 'Imagem devolvida não é PNG.');
+  const provenance = result.proveniencia && typeof result.proveniencia === 'object' ? result.proveniencia as Record<string, unknown> : {};
+  return { base64: first.b64_json, mimeType: 'image/png', providerId: body.provedorId, modelId: body.modeloId,
+    generationId: typeof provenance.request_id === 'string' ? provenance.request_id : 'central-gateway' };
 }

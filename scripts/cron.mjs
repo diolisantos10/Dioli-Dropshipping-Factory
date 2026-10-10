@@ -13,7 +13,7 @@ try {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify(tasks?.length ? { tasks } : {}),
-    signal: AbortSignal.timeout(290_000),
+    signal: AbortSignal.timeout(600_000),
   });
   const body = await response.json().catch(() => ({}));
   const summary = (body.results ?? []).map((item) => {

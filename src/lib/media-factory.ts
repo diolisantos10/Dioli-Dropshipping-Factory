@@ -14,13 +14,19 @@ export type MediaAsset = {
   rightsExpiresAt?: string; transformationNotes?: string; changesProductAppearance?: boolean;
   studio?: boolean; studioAngle?: string; sourceAssetIds?: string[]; fidelityVerified?: boolean;
   fidelityEvidence?: string; generationProvider?: string; generationId?: string;
+  removedAt?: string; removedBy?: string; removalReason?: string;
 };
 export type TransformationJob = {
   id: string; productId: string; sourceAssetId: string; kind: TransformationKind; destination: string;
   format: MediaFormat; aspectRatio: MediaAspectRatio; status: TransformationJobStatus; requestedAt: string;
   finishedAt?: string; derivedAssetId?: string; error?: string;
 };
-export type MediaState = { version: 1 | 2; assets: MediaAsset[]; jobs?: TransformationJob[] };
+export type MediaProductionRequest = {
+  id: string; productId: string; status: 'PENDENTE' | 'PROCESSANDO' | 'CONCLUIDO' | 'BLOQUEADO' | 'FALHOU';
+  requestedAt: string; requestedBy: string; updatedAt: string; sourceAssetIds: string[];
+  requiredCount: 4; error?: string;
+};
+export type MediaState = { version: 1 | 2; assets: MediaAsset[]; jobs?: TransformationJob[]; productionRequests?: MediaProductionRequest[] };
 export const MEDIA_STORAGE_KEY = 'ddf.media.demo.v1';
 export const emptyMedia: MediaState = { version: 2, assets: [], jobs: [] };
 

@@ -9,10 +9,12 @@ import { useServerStates } from '@/components/use-server-states';
 import { FiscalPanel } from '@/components/fiscal-form';
 import { approvedStudioAssets } from '@/lib/media-factory';
 import { availabilityLabels } from '@/lib/product-fiscal';
+import { emptyProductFilters, matchesApprovedCandidateFilters, matchesProductFilters, productMissingTechnical, type ProductFilters } from '@/lib/product-filters';
 
 // Read straight from the server: a stale or old-version browser cache can no longer block this screen.
 const NAMESPACES = ['intake', 'products', 'media'] as const;
 const lines = (value: FormDataEntryValue | null) => String(value ?? '').split('\n');
+const queueLabels: Record<string, string> = { PENDING: 'na fila', PROCESSING: 'em execução', CONTINUING: 'leitura em andamento', COMPLETED: 'concluído', BLOCKED: 'bloqueado', FAILED: 'falhou', PENDENTE: 'na fila', PROCESSANDO: 'em execução', CONCLUIDO: 'concluído', BLOQUEADO: 'bloqueado', FALHOU: 'falhou' };
 const cleanLines = (value: FormDataEntryValue | null) => lines(value).map(item=>item.trim()).filter(Boolean);
 function parseRecord<T>(value: FormDataEntryValue|null, label:string):T { try { const parsed=JSON.parse(String(value||'{}')); if(!parsed||typeof parsed!=='object') throw new Error(); return parsed as T; } catch { throw new Error(`${label} deve conter JSON válido.`); } }
 const numberField=(form:FormData,name:string)=>{const raw=String(form.get(name)??'').trim();if(!raw)return null;const value=Number(raw);if(!Number.isFinite(value)||value<=0)throw new Error('Medidas devem ser números positivos; deixe vazias quando não informadas.');return value;};
@@ -27,12 +29,64 @@ export function ProductFactoryWorkspace({ mode }: { mode: 'factory' | 'catalog' 
   const { states, status, fromCache, error: loadError, reload } = useServerStates(NAMESPACES);
   const data = { intake: states.intake, factory: states.products, media: states.media };
   const ready = status === 'ready' || fromCache;
-  const [editing, setEditing] = useState<string | null>(null); const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [query, setQuery] = useState('');
+  const [editing, setEditing] = useState<string | null>(null); const [message, setMessage] = useState(''); const [error, setError] = useState(''); const [filters, setFilters] = useState<ProductFilters>(emptyProductFilters);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [archivePending, setArchivePending] = useState(false);
+  const [archiveReason, setArchiveReason] = useState('Retirado da produção por decisão de curadoria');
   const [openId, setOpenId] = useState<string | null>(null);
   const candidates = useMemo(() => new Map(data.intake.candidates.map(c => [c.id, candidateCard(c)])), [data.intake.candidates]);
   const photoOf = (product: MasterProduct) => approvedStudioAssets(data.media,product.id)[0]?.url ?? candidates.get(product.candidateId)?.imageUrl ?? '';
-  const approved = data.intake.candidates.filter(c => c.status === 'APROVADO' && !data.factory.products.some(p => p.candidateId === c.id));
-  const products = data.factory.products.filter(p => (mode === 'factory' || p.status === 'PRONTO') && p.universalTitle.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  const sourceCandidates = new Map(data.intake.candidates.map(candidate => [candidate.id, candidate]));
+  const allApproved = data.intake.candidates.filter(c => c.status === 'APROVADO' && !data.factory.products.some(p => p.candidateId === c.id));
+  const approved = allApproved.filter(candidate => matchesApprovedCandidateFilters(candidate, filters));
+  const areaProducts = data.factory.products.filter(product => mode === 'factory' || product.status === 'PRONTO');
+  const studioCounts = new Map(areaProducts.map(product => [product.id, approvedStudioAssets(data.media, product.id).length]));
+  const products = areaProducts.filter(product => matchesProductFilters(product, sourceCandidates.get(product.candidateId), filters, studioCounts.get(product.id)));
+  const options = (values: (string | undefined)[]) => [...new Set(values.filter((value): value is string => !!value?.trim()))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const categories = options([...areaProducts.map(product => product.category), ...allApproved.map(candidate => candidate.category)]);
+  const suppliers = options([...areaProducts.map(product => sourceCandidates.get(product.candidateId)?.supplier?.name), ...allApproved.map(candidate => candidate.supplier?.name)]);
+  const brands = options(areaProducts.map(product => product.spec?.technical?.brand));
+  const selectedProducts = products.filter(product => selected.has(product.id));
+  const editableSelection = selectedProducts.filter(product => product.status === 'EM_PRODUCAO' && !product.archivedAt);
+  const incompleteSelection = editableSelection.filter(product => productGaps(product).length > 0);
+  const readySelection = editableSelection.filter(product => !productGaps(product).length && (studioCounts.get(product.id) ?? 0) >= 4);
+  const allSelected = products.length > 0 && selectedProducts.length === products.length;
+  const updateFilters = (patch: Partial<ProductFilters>) => { setFilters(current => ({ ...current, ...patch })); setSelected(new Set()); setArchivePending(false); };
+  const toggle = (id: string) => setSelected(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  async function delegateBulk(type: 'media.bulkSendToMedia' | 'products.bulkRequestCompletion', productIds: string[]) {
+    if (bulkBusy || !productIds.length) return;
+    setBulkBusy(true); setError(''); setMessage('');
+    let sent = 0;
+    try {
+      for (let offset = 0; offset < productIds.length; offset += 200) {
+        const batch = productIds.slice(offset, offset + 200);
+        await sendCommand(command(type, { productIds: batch })); sent += batch.length;
+      }
+      setMessage(`${sent} produto(s) enviado(s) à fila de ${type === 'media.bulkSendToMedia' ? 'mídia' : 'complementação do cadastro'}. Os agentes executarão as etapas; pendências continuam visíveis até a conclusão.`);
+      setSelected(new Set()); reload();
+    } catch (cause) { setError(`${sent ? `${sent} produto(s) já enviado(s). ` : ''}${errorMessage(cause)}`); reload(); }
+    finally { setBulkBusy(false); }
+  }
+  async function finalizeSelection(kind: 'archive' | 'ready') {
+    if (bulkBusy) return;
+    const targets = kind === 'archive' ? editableSelection : readySelection;
+    if (!targets.length || (kind === 'archive' && !archiveReason.trim())) return;
+    setBulkBusy(true); setError(''); setMessage(''); let sent = 0;
+    try {
+      if (kind === 'archive') {
+        for (let offset = 0; offset < targets.length; offset += 200) {
+          const batch = targets.slice(offset, offset + 200);
+          await sendCommand(command('products.bulkArchive', { productIds: batch.map(product => product.id), reason: archiveReason })); sent += batch.length;
+        }
+      } else {
+        for (const product of targets) { await sendCommand(command('products.markReady', { productId: product.id })); sent++; }
+      }
+      setMessage(`${sent} produto(s) ${kind === 'archive' ? 'arquivado(s). Histórico e originais preservados.' : 'marcado(s) como pronto(s), sem publicar na loja.'}`);
+      setSelected(new Set()); setArchivePending(false); reload();
+    } catch (cause) { setError(`${sent ? `${sent} produto(s) já processado(s). ` : ''}${errorMessage(cause)}`); reload(); }
+    finally { setBulkBusy(false); }
+  }
   const open = openId ? data.factory.products.find(p => p.id === openId) ?? null : null;
   function act(cmd: Command, success: string) { sendCommand(cmd).then(() => { setError(''); setMessage(success); setEditing(null); }, e => setError(errorMessage(e))); }
   return <div className="space-y-6">
@@ -40,19 +94,41 @@ export function ProductFactoryWorkspace({ mode }: { mode: 'factory' | 'catalog' 
     <p className="surface p-4 text-sm">Produto mestre não contém fornecedor, preço, canal ou publicação. Essas decisões permanecem independentes.</p>
     {(error || loadError) && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border border-red-300 bg-red-50 p-4 text-red-800"><span>{error || loadError}</span>{loadError && <button className="ddf-button secondary" onClick={reload}>Tentar de novo</button>}</div>}<p role="status" className="text-sm text-green-800">{message}</p>
     {!ready ? <p className="surface p-6 text-sm">Carregando dados do servidor…</p> : <>
-    {mode === 'factory' && <section className="space-y-3"><div className="section-heading"><div><h2>Fila aprovada</h2><p>{approved.length} candidato(s) aguardando início explícito da produção.</p></div></div>
+    {mode === 'factory' && <section className="space-y-3"><div className="section-heading"><div><h2>Fila aprovada</h2><p>{approved.length} de {allApproved.length} candidato(s) aprovado(s) no filtro aguardando produção.</p></div></div>
       {approved.length === 0 ? <p className="surface p-6 text-sm">Nenhum candidato aprovado aguardando produção.</p> : <ul className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">{approved.map(c => { const card = candidates.get(c.id); return <li key={c.id} className="surface flex flex-col overflow-hidden"><Photo url={card?.imageUrl ?? ''} /><div className="flex flex-1 flex-col gap-2 p-3"><h3 className="line-clamp-2 text-sm font-semibold leading-snug" title={c.fullName || c.name}>{c.name}</h3><p className="text-xs text-[var(--muted)]">Aprovado na triagem · {card?.supplier}</p><button className="ddf-button mt-auto !w-full !px-3 text-sm" onClick={() => act(command('products.start', { candidateId: c.id }), 'Produção iniciada. Nenhuma operação externa foi acionada.')}>Iniciar produção</button></div></li>; })}</ul>}
     </section>}
-    <label className="block">Buscar produto<input className="ddf-input" type="search" value={query} onChange={e => setQuery(e.target.value)} /></label>
-    <p className="text-sm text-gray-600">{products.length} produto(s) nesta área</p>
-    {products.length === 0 && <div className="surface p-8"><h2 className="text-lg font-semibold">{mode === 'catalog' ? 'Nenhum produto pronto' : 'A fábrica está vazia'}</h2><p className="mt-2">{mode === 'catalog' ? 'Finalize um cadastro mestre na Product Factory.' : 'Aprove um candidato na Sala de Triagem e inicie sua produção.'}</p></div>}
-    <ul className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6" aria-label="Produtos mestres">{products.map(product => { const completion = productCompletion(product); return <li key={product.id} className="surface overflow-hidden transition-shadow hover:shadow-lg">
-      <button type="button" className="flex h-full w-full flex-col text-left" onClick={() => setOpenId(product.id)} aria-label={`Abrir ${product.universalTitle}`}>
-        <div className="relative w-full"><Photo url={photoOf(product)} /><span className={`absolute bottom-2 left-2 rounded-full px-2 py-1 text-[11px] font-semibold ${product.status === 'PRONTO' ? 'bg-[var(--success-soft)] text-[var(--success)]' : 'bg-[var(--surface-strong)] text-[var(--ink)]'}`}>{product.status === 'PRONTO' ? 'Pronto' : 'Em produção'}</span>{product.availability && <span className={`absolute right-2 top-2 rounded-full px-2 py-1 text-[11px] font-bold ${product.availability === 'PRONTA_ENTREGA' ? 'bg-[var(--accent)] text-[var(--accent-ink)]' : 'bg-[var(--ink)] text-[var(--brand-branco)]'}`}>{availabilityLabels[product.availability]}</span>}</div>
+    <section className="surface space-y-3 p-4" aria-label="Filtros de produtos">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <label className="text-sm sm:col-span-2">Buscar produto<input className="ddf-input" type="search" value={filters.query} onChange={event => updateFilters({ query: event.target.value })} placeholder="Nome, categoria, fornecedor, marca ou SKU" /></label>
+        <label className="text-sm">Categoria<select className="ddf-input" value={filters.category} onChange={event => updateFilters({ category: event.target.value })}><option value="">Todas as categorias</option>{categories.map(value => <option key={value}>{value}</option>)}</select></label>
+        <label className="text-sm">Fornecedor de origem<select className="ddf-input" value={filters.supplier} onChange={event => updateFilters({ supplier: event.target.value })}><option value="">Todos os fornecedores</option>{suppliers.map(value => <option key={value}>{value}</option>)}</select></label>
+        <label className="text-sm">Marca informada na ficha<select className="ddf-input" value={filters.brand} onChange={event => updateFilters({ brand: event.target.value })}><option value="">Todas as marcas</option>{brands.map(value => <option key={value}>{value}</option>)}</select></label>
+        {mode === 'factory' && <label className="text-sm">Estado do cadastro<select className="ddf-input" value={filters.status} onChange={event => updateFilters({ status: event.target.value as ProductFilters['status'] })}><option value="">Todos os estados</option><option value="EM_PRODUCAO">Em produção</option><option value="PRONTO">Pronto</option></select></label>}
+        <label className="text-sm">Pendência técnica<select className="ddf-input" value={filters.missing} onChange={event => updateFilters({ missing: event.target.value as ProductFilters['missing'] })}><option value="">Todas as fichas</option><option value="any">Qualquer pendência técnica</option><option value="dimensions">Dimensões incompletas</option><option value="weight">Peso incompleto</option><option value="material">Material ausente</option></select></label>
+        <label className="text-sm">Arquivamento<select className="ddf-input" value={filters.archived ?? 'active'} onChange={event => updateFilters({ archived: event.target.value as ProductFilters['archived'] })}><option value="active">Somente ativos</option><option value="only">Somente arquivados</option><option value="all">Ativos e arquivados</option></select></label>
+        <label className="text-sm">Fotos de estúdio<select className="ddf-input" value={filters.media} onChange={event => updateFilters({ media: event.target.value as ProductFilters['media'] })}><option value="">Todas</option><option value="pending">Menos de quatro aprovadas</option><option value="complete">Quatro ou mais aprovadas</option></select></label>
+      </div>
+      <div className="flex flex-wrap items-center gap-3"><button type="button" className={`ddf-button ${filters.eyewearOnly ? '' : 'secondary'}`} aria-pressed={filters.eyewearOnly} onClick={() => updateFilters({ eyewearOnly: !filters.eyewearOnly })}>Somente óculos</button><button type="button" className="ddf-button secondary" onClick={() => { setFilters(emptyProductFilters); setSelected(new Set()); }}>Limpar filtros</button><p className="text-sm text-[var(--muted)]" aria-live="polite">{products.length} de {areaProducts.length} produto(s) · {approved.length} candidato(s) aprovado(s) no filtro</p></div>
+    </section>
+    {mode === 'factory' && <section className="surface flex flex-wrap items-center gap-3 p-4" aria-label="Delegação em massa">
+      <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" className="h-5 w-5" checked={allSelected} disabled={!products.length || bulkBusy} onChange={() => setSelected(allSelected ? new Set() : new Set(products.map(product => product.id)))} />Selecionar todos no filtro ({products.length})</label>
+      <span className="text-sm">{selectedProducts.length} selecionado(s)</span>
+      <button type="button" className="ddf-button" disabled={bulkBusy || !incompleteSelection.length} onClick={() => delegateBulk('products.bulkRequestCompletion', incompleteSelection.map(product => product.id))}>{bulkBusy ? 'Enviando…' : `Delegar cadastro (${incompleteSelection.length})`}</button>
+      <button type="button" className="ddf-button secondary" disabled={bulkBusy || !editableSelection.length} onClick={() => delegateBulk('media.bulkSendToMedia', editableSelection.map(product => product.id))}>Enviar para mídia ({editableSelection.length})</button>
+      <button type="button" className="ddf-button secondary" disabled={bulkBusy || !readySelection.length} onClick={() => finalizeSelection('ready')}>Marcar prontos ({readySelection.length})</button>
+      <button type="button" className="ddf-button secondary text-[var(--danger)]" disabled={bulkBusy || !editableSelection.length} onClick={() => setArchivePending(true)}>Arquivar selecionados ({editableSelection.length})</button>
+      {archivePending && <form className="w-full space-y-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm" onSubmit={event => { event.preventDefault(); void finalizeSelection('archive'); }}><p>Retirar <strong>{editableSelection.length} cadastro(s) em produção</strong> da lista ativa e das filas dos agentes? Histórico e fotos ficam preservados. Produtos prontos não são arquivados por esta ação.</p><label className="block">Motivo para auditoria<textarea className="ddf-input" value={archiveReason} onChange={event => setArchiveReason(event.target.value)} required maxLength={2000} rows={2} /></label><div className="flex flex-wrap gap-2"><button className="ddf-button" disabled={bulkBusy || !archiveReason.trim()}>{bulkBusy ? 'Arquivando…' : 'Confirmar arquivamento'}</button><button type="button" className="ddf-button secondary" disabled={bulkBusy} onClick={() => setArchivePending(false)}>Cancelar</button></div></form>}
+      <p className="w-full text-xs text-[var(--muted)]">A seleção inclui todos os resultados do filtro. Produtos prontos ficam preservados; a delegação cria uma fila e não publica na loja.</p>
+    </section>}
+    {products.length === 0 && <div className="surface p-8"><h2 className="text-lg font-semibold">{areaProducts.length ? 'Nenhum produto corresponde aos filtros' : mode === 'catalog' ? 'Nenhum produto pronto' : 'A fábrica está vazia'}</h2><p className="mt-2">{areaProducts.length ? 'Ajuste os filtros ou use Limpar filtros para voltar à lista completa.' : mode === 'catalog' ? 'Finalize um cadastro mestre na Product Factory.' : 'Aprove um candidato na Sala de Triagem e inicie sua produção.'}</p></div>}
+    <ul className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6" aria-label="Produtos mestres">{products.map(product => { const completion = productCompletion(product); const completionRequest = data.factory.completionRequests?.find(request => request.productId === product.id); const mediaRequest = data.media.productionRequests?.find(request => request.productId === product.id); return <li key={product.id} className={`surface relative flex flex-col overflow-hidden transition-shadow hover:shadow-lg ${selected.has(product.id) ? 'ring-2 ring-[var(--accent)]' : ''}`}>
+      {mode === 'factory' && <label className="absolute left-2 top-2 z-10 grid h-10 w-10 place-items-center rounded-full bg-white/95 shadow"><input type="checkbox" className="h-5 w-5" aria-label={`Selecionar ${product.universalTitle}`} checked={selected.has(product.id)} disabled={bulkBusy} onChange={() => toggle(product.id)} /></label>}
+      <button type="button" className="flex w-full flex-1 flex-col text-left" onClick={() => setOpenId(product.id)} aria-label={`Abrir ${product.universalTitle}`}>
+        <div className="relative w-full"><Photo url={photoOf(product)} /><span className={`absolute bottom-2 left-2 rounded-full px-2 py-1 text-[11px] font-semibold ${product.status === 'PRONTO' ? 'bg-[var(--success-soft)] text-[var(--success)]' : 'bg-[var(--surface-strong)] text-[var(--ink)]'}`}>{product.status === 'PRONTO' ? 'Pronto' : product.archivedAt ? 'Arquivado' : 'Em produção'}</span>{product.availability && <span className={`absolute right-2 top-2 rounded-full px-2 py-1 text-[11px] font-bold ${product.availability === 'PRONTA_ENTREGA' ? 'bg-[var(--accent)] text-[var(--accent-ink)]' : 'bg-[var(--ink)] text-[var(--brand-branco)]'}`}>{availabilityLabels[product.availability]}</span>}</div>
         <div className="flex flex-1 flex-col gap-2 p-3"><h3 className="line-clamp-2 text-sm font-semibold leading-snug">{product.universalTitle}</h3><p className="truncate text-xs text-[var(--muted)]">{product.category || 'Categoria pendente'} · v{product.version}</p>
-          <div className="mt-auto"><div className="flex justify-between text-xs"><span className="text-[var(--muted)]">Completude</span><strong>{completion}%</strong></div><div className="mt-1 h-1.5 rounded-full bg-stone-200"><div className="h-1.5 rounded-full bg-[var(--ink)]" style={{ width: `${completion}%` }} /></div></div></div>
-      </button></li>; })}</ul>
-    {open && <Panel title={open.universalTitle} onClose={() => { setOpenId(null); setEditing(null); }}><ProductCard product={open} versions={(data.factory.versions??[]).filter(v=>v.productId===open.id).sort((a,b)=>b.version-a.version)} editable={mode === 'factory'} editing={editing === open.id} onEdit={() => setEditing(open.id)} onCancel={() => setEditing(null)} onSave={form => act(command('products.update', { productId: open.id, universalTitle: String(form.get('title')), category: String(form.get('category')), shortDescription: String(form.get('short')), longDescription: String(form.get('long')), bullets: lines(form.get('bullets')), benefits: lines(form.get('benefits')), tags: String(form.get('tags')).split(','), spec:readSpec(form) }), 'Rascunho salvo e nova versão registrada.')} onRestore={version=>act(command('products.restoreVersion',{productId:open.id,version}),`Versão ${version} restaurada como uma nova versão.`)} onReady={() => act(command('products.markReady', { productId: open.id }), 'Produto marcado como pronto. Nenhuma publicação foi iniciada.')} />{editing !== open.id && <div className="border-t border-[var(--line)] p-4 sm:p-6"><FiscalPanel product={open} /></div>}</Panel>}
+          <p className="text-xs text-[var(--muted)]">{Object.entries(productMissingTechnical(product)).filter(([, missing]) => missing).map(([field]) => ({ dimensions: 'Dimensões pendentes', weight: 'Peso pendente', material: 'Material pendente' }[field])).join(' · ') || 'Ficha técnica confirmada'}</p><p className="text-xs text-[var(--muted)]">{studioCounts.get(product.id) ?? 0}/4 fotos de estúdio aprovadas</p>{completionRequest && <p className="text-xs text-[var(--muted)]" title={completionRequest.reason}>Agente cadastro: {queueLabels[completionRequest.status] ?? completionRequest.status}</p>}{mediaRequest && <p className="text-xs text-[var(--muted)]" title={mediaRequest.error}>Agente mídia: {queueLabels[mediaRequest.status] ?? mediaRequest.status}</p>}<div className="mt-auto"><div className="flex justify-between text-xs"><span className="text-[var(--muted)]">Completude</span><strong>{completion}%</strong></div><div className="mt-1 h-1.5 rounded-full bg-stone-200"><div className="h-1.5 rounded-full bg-[var(--ink)]" style={{ width: `${completion}%` }} /></div></div></div>
+      </button>{(sourceCandidates.get(product.candidateId)?.url || product.spec?.sourceUrl) && <a className="mx-3 mb-3 inline-flex min-h-9 items-center text-xs font-medium underline" href={sourceCandidates.get(product.candidateId)?.url || product.spec?.sourceUrl} target="_blank" rel="noopener noreferrer">Abrir produto no fornecedor ↗</a>}</li>; })}</ul>
+    {open && <Panel title={open.universalTitle} onClose={() => { setOpenId(null); setEditing(null); }}><ProductCard product={open} versions={(data.factory.versions??[]).filter(v=>v.productId===open.id).sort((a,b)=>b.version-a.version)} editable={mode === 'factory' && !open.archivedAt} editing={editing === open.id} onEdit={() => setEditing(open.id)} onCancel={() => setEditing(null)} onSave={form => act(command('products.update', { productId: open.id, universalTitle: String(form.get('title')), category: String(form.get('category')), shortDescription: String(form.get('short')), longDescription: String(form.get('long')), bullets: lines(form.get('bullets')), benefits: lines(form.get('benefits')), tags: String(form.get('tags')).split(','), spec:readSpec(form) }), 'Rascunho salvo e nova versão registrada.')} onRestore={version=>act(command('products.restoreVersion',{productId:open.id,version}),`Versão ${version} restaurada como uma nova versão.`)} onReady={() => act(command('products.markReady', { productId: open.id }), 'Produto marcado como pronto. Nenhuma publicação foi iniciada.')} />{editing !== open.id && !open.archivedAt && <div className="border-t border-[var(--line)] p-4 sm:p-6"><FiscalPanel product={open} /></div>}</Panel>}
     </>}
   </div>;
 }

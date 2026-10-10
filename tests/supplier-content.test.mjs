@@ -53,3 +53,9 @@ test('variantes mantêm medidas próprias e evidências sobrevivem à prateleira
   assert.equal(persisted.supplier.variants[1].dimensions.heightCm, 14);
   assert.equal(persisted.supplier.variants[1].facts[0].sku, '14');
 });
+
+test('lens, temple and bridge sizes never become overall eyewear dimensions', () => {
+  const result = supplierMeasurements('Lens width: 54 mm\nTemple length: 145 mm\nBridge width: 18 mm\nAltura da lente: 43 mm\nLente height: 43 mm\nHaste length: 145 mm\nFrame width: 140 mm\nProduct length: 150 mm\nHeight: 50 mm', 'specification');
+  assert.deepEqual(result.dimensions, { widthCm: 14, lengthCm: 15, heightCm: 5 });
+  assert.equal(result.facts.length, 3);
+});

@@ -3,9 +3,11 @@
 // computed payload. Identity, timestamps and IDs come from the server context, and cross-module
 // rules (approved candidate, approved media, READY product, approver role) are enforced here.
 import { addCandidate, bulkTransitionCandidates, refreshCandidateSupplier, emptyIntake, transitionCandidate, type CandidateSource, type CandidateStatus, type CandidateSupplier, type IntakeState, type SupplierFact } from './intake.ts';
-import { emptyProductFactory, markProductReady, refreshProductSupplier, restoreProductVersion, setProductAvailability, startProduct, updateProduct, updateProductFiscal, type ProductFactoryState, type UniversalProductSpec } from './product-factory.ts';
+import { archiveProducts, emptyProductFactory, markProductReady, refreshProductSupplier, restoreProductVersion, setProductAvailability, startProduct, updateProduct, updateProductFiscal, type ProductFactoryState, type UniversalProductSpec } from './product-factory.ts';
 import type { Availability, ProductFiscal, VariantLogistics } from './product-fiscal.ts';
 import { addMedia, completeTransformation, emptyMedia, enqueueTransformation, ingestSupplierOriginals, studioReadiness, reviewMedia, updateTransformationJob, type MediaAsset, type MediaState, type TransformationJob } from './media-factory.ts';
+import { bulkSendToMedia, recordMediaProductionResult, updateMediaProductionRequest } from './media-production-queue.ts';
+import { requestProductCompletion, updateCompletionRequest } from './product-completion-queue.ts';
 import { approvePrice, calculatePrice, emptyPricing, recalculateSupplierCost, releaseQuarantine, type PricingInput, type PricingState } from './pricing.ts';
 import { advanceOrder, emptyOrders, flagOrderException, purgeExpiredOrderData, receiveOrder, resolveOrderException, type ExceptionCategory, type ExceptionResolution, type OrderState, type OrderStatus } from './orders.ts';
 import { addSupplierOffer, assignProduct, catalogReadiness, curateProducts, emptyCatalog, refreshSupplierOffer, upsertParty, type CatalogState } from './catalog.ts';
@@ -67,6 +69,7 @@ function sMedia(states: CommandStates) { return states.media.assets; }
 function productInProduction(states: CommandStates, productId: string) {
   const product = states.products.products.find((item) => item.id === productId);
   if (!product) throw new CommandError('Produto mestre não encontrado.', 404);
+  if (product.archivedAt) throw new CommandError('Produto arquivado não pode receber novas mídias.');
   if (product.status !== 'EM_PRODUCAO') throw new CommandError('Mídia nova só pode ser registrada para produtos em produção.');
   return product;
 }
@@ -181,6 +184,20 @@ export const COMMANDS: Record<string, Handler> = {
     if (!candidate) throw new CommandError('Candidato não encontrado.', 404);
     return startProduct(s.products, candidate, c.newId(), c.at, c.actor);
   } },
+  'products.bulkRequestCompletion': { writes: 'products', reads: [], roles: always([...OPERATE, 'SYSTEM']), run: (s, i, c) =>
+    requestProductCompletion(s.products, ids(i, 'productIds'), c.newId, c.at, c.actor) },
+  'products.bulkArchive': { writes: 'products', reads: [], roles: always(OPERATE), run: (s, i, c) =>
+    archiveProducts(s.products, ids(i, 'productIds'), str(i, 'reason', 2000), c.at, c.actor) },
+  'products.updateCompletionRequest': { writes: 'products', reads: [], roles: always(['SYSTEM']), run: (s, i, c) => {
+    const attempts = num(i, 'attempts');
+    if (!Number.isInteger(attempts) || attempts < 0 || attempts > 1000) throw new CommandError('Tentativas inválidas.');
+    const nextAttemptAt = str(i, 'nextAttemptAt', 40, false) || undefined;
+    if (nextAttemptAt && Number.isNaN(Date.parse(nextAttemptAt))) throw new CommandError('Data de próxima tentativa inválida.');
+    return updateCompletionRequest(s.products, str(i, 'requestId', 80), {
+      status: oneOf(i, 'status', ['PENDING', 'PROCESSING', 'CONTINUING', 'COMPLETED', 'BLOCKED', 'FAILED'] as const), attempts,
+      code: str(i, 'code', 100, false) || undefined, reason: str(i, 'reason', 1000, false) || undefined, nextAttemptAt,
+    }, c.at);
+  } },
   'products.refreshSupplier': { writes: 'products', reads: ['intake'], roles: always(['ADMIN', 'SYSTEM']), run: (s, i, c) => {
     const productId = str(i, 'productId', 80);
     const product = s.products.products.find(item => item.id === productId);
@@ -206,6 +223,19 @@ export const COMMANDS: Record<string, Handler> = {
     const productId = str(i, 'productId', 80);
     return markProductReady(s.products, productId, c.at, studioReadiness(s.media, productId).approvedCount, c.actor);
   } },
+  'media.bulkSendToMedia': { writes: 'media', reads: ['products', 'intake'], roles: always(OPERATE), run: (s, i, c) =>
+    bulkSendToMedia(s.media, s.products, s.intake, ids(i, 'productIds'), c.newId, c.at, c.actor) },
+  'media.updateProductionRequest': { writes: 'media', reads: [], roles: always(['SYSTEM']), run: (s, i, c) =>
+    updateMediaProductionRequest(s.media, str(i, 'requestId', 80), oneOf(i, 'status', ['PENDENTE', 'PROCESSANDO', 'CONCLUIDO', 'BLOQUEADO', 'FALHOU'] as const), c.at, str(i, 'error', 1000, false)) },
+  'media.recordStudioResult': { writes: 'media', reads: ['products'], roles: always(['SYSTEM']), run: (s, i, c) => {
+    if (typeof i.approved !== 'boolean') throw new CommandError('Informe o resultado da revisão visual.');
+    const raw = obj(i, 'asset');
+    productInProduction(s, str(raw, 'productId', 80));
+    return recordMediaProductionResult(s.media, str(i, 'requestId', 80), {
+      ...mediaAssetInput(raw), studioAngle: str(raw, 'studioAngle', 100), fidelityEvidence: str(raw, 'fidelityEvidence', 2000),
+      generationProvider: str(raw, 'generationProvider', 100), generationId: str(raw, 'generationId', 200), sourceAssetIds: strings(raw, 'sourceAssetIds', 16),
+    }, i.approved, c.newId(), c.at);
+  } },
   'media.archiveSupplierOriginals': { writes: 'media', reads: ['products', 'intake'], roles: always(['ADMIN', 'SYSTEM']), run: (s, i, c) => {
     const product = productInProduction(s, str(i, 'productId', 80));
     const candidate = s.intake.candidates.find(item => item.id === product.candidateId);
@@ -226,6 +256,12 @@ export const COMMANDS: Record<string, Handler> = {
     return addMedia(s.media, asset, c.newId(), c.at);
   } },
   'media.review': { writes: 'media', reads: [], roles: always(APPROVE), run: (s, i) => reviewMedia(s.media, str(i, 'assetId', 80), oneOf(i, 'status', ['APROVADA', 'REJEITADA'] as const)) },
+  'media.bulkRemoveCommercialAssets': { writes: 'media', reads: [], roles: always(APPROVE), run: (s, i, c) => {
+    const selected = new Set(ids(i, 'assetIds')); const reason = str(i, 'reason', 2000).trim();
+    if (!reason) throw new CommandError('Informe o motivo da remoção.');
+    if (!s.media.assets.some(asset => selected.has(asset.id) && asset.kind === 'DERIVADA' && asset.status !== 'REJEITADA')) throw new CommandError('Nenhuma mídia comercial elegível selecionada.');
+    return { ...s.media, assets: s.media.assets.map(asset => selected.has(asset.id) && asset.kind === 'DERIVADA' && asset.status !== 'REJEITADA' ? { ...asset, status: 'REJEITADA' as const, removedAt: c.at, removedBy: c.actor, removalReason: reason } : asset) };
+  } },
   'media.enqueueTransformation': { writes: 'media', reads: [], roles: always(OPERATE), run: (s, i, c) => {
     const source = s.media.assets.find((asset) => asset.id === str(i, 'sourceAssetId', 80));
     if (!source) throw new CommandError('Mídia original não encontrada.', 404);

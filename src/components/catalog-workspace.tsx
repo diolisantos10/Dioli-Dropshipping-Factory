@@ -16,7 +16,7 @@ const list = (value: FormDataEntryValue | null) => String(value ?? '').split(','
 const bulkActions: BulkAction[] = [
   { status: 'APROVADO', label: 'Aprovar', tone: 'primary' },
   { status: 'REJEITADO', label: 'Rejeitar', tone: 'danger' },
-  { status: 'ARQUIVADO', label: 'Arquivar' },
+  { status: 'ARQUIVADO', label: 'Remover da lista / arquivar' },
 ];
 const stateOptions: StateOption[] = [
   { value: 'ATIVOS', label: 'Ativos (sem arquivados)' }, { value: '', label: 'Todos' },
@@ -34,7 +34,7 @@ export function CatalogWorkspace() {
   }, [records, states.catalog.curation, states.intake.candidates]);
   function act(cmd: Command, success: string) { sendCommand(cmd).then(() => { setError(''); setMessage(success); }, cause => setError(errorMessage(cause))); }
   async function onBulk(ids: string[], target: string, reason: string) {
-    try { await sendCommand(command('catalog.bulkCurate', { productIds: ids, status: target, reason })); }
+    try { for (let offset = 0; offset < ids.length; offset += 200) await sendCommand(command('catalog.bulkCurate', { productIds: ids.slice(offset, offset + 200), status: target, reason })); }
     catch (cause) { throw new Error(errorMessage(cause, 'Não foi possível registrar a decisão.')); }
     return `${ids.length} produto(s) → ${curationLabels[target as CurationStatus]}. Registrado na auditoria; nada foi publicado.`;
   }

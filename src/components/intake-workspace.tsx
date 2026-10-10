@@ -11,9 +11,9 @@ import { useServerStates } from '@/components/use-server-states';
 const NAMESPACES = ['intake'] as const;
 const TRIAGE_STATES: CandidateStatus[] = ['TRIADO', 'INFORMACAO_SOLICITADA'];
 const bulkActions: BulkAction[] = [
-  { status: 'APROVADO', label: 'Mandar produzir', tone: 'primary' },
+  { status: 'APROVADO', label: 'Aprovar e mandar produzir', tone: 'primary' },
   { status: 'REJEITADO', label: 'Rejeitar', tone: 'danger' },
-  { status: 'ARQUIVADO', label: 'Arquivar' },
+  { status: 'ARQUIVADO', label: 'Remover da lista / arquivar' },
 ];
 const stepActions: Partial<Record<CandidateStatus, { status: CandidateStatus; label: string }[]>> = {
   CANDIDATO: [{ status: 'TRIADO', label: 'Enviar para triagem' }],
@@ -38,7 +38,7 @@ export function IntakeWorkspace({ mode }: { mode: 'intake' | 'triage' | 'audit' 
     const byId = new Map(state.candidates.map(c => [c.id, c]));
     const eligible = ids.filter(id => { const c = byId.get(id); return !!c && !!bulkPath(c.status, target as BulkStatus); });
     if (!eligible.length) throw new Error('Nenhum item selecionado aceita esta decisão no estado atual.');
-    try { await sendCommand(command('intake.bulkTransition', { candidateIds: eligible, status: target, reason })); }
+    try { for (let offset = 0; offset < eligible.length; offset += 200) await sendCommand(command('intake.bulkTransition', { candidateIds: eligible.slice(offset, offset + 200), status: target, reason })); }
     catch (cause) { throw new Error(errorMessage(cause, 'Não foi possível registrar a decisão.')); }
     const skipped = ids.length - eligible.length;
     return `${eligible.length} produto(s) → ${labels[target as CandidateStatus]}.${skipped ? ` ${skipped} ignorado(s) por não aceitarem esta decisão.` : ''} Registrado na auditoria.`;
@@ -66,7 +66,7 @@ export function IntakeWorkspace({ mode }: { mode: 'intake' | 'triage' | 'audit' 
         </form>
       </details>}
       {(mode === 'intake' || mode === 'triage') && <Storefront
-        cards={cards} stateOptions={stateOptions} defaultState={mode === 'intake' ? 'CANDIDATO' : ''} bulkActions={mode === 'intake' ? [{ status: 'TRIADO', label: 'Reservar na triagem', tone: 'primary' }, { status: 'ARQUIVADO', label: 'Arquivar' }] : bulkActions} onBulk={onBulk}
+        cards={cards} stateOptions={stateOptions} defaultState={mode === 'intake' ? 'CANDIDATO' : ''} bulkActions={mode === 'intake' ? [{ status: 'TRIADO', label: 'Reservar na triagem', tone: 'primary' }, { status: 'ARQUIVADO', label: 'Remover da lista / arquivar' }] : bulkActions} onBulk={onBulk}
         loading={status === 'loading' && !fromCache}
         emptyText={mode === 'triage' ? 'Envie produtos da Prateleira Bruta para a triagem ou ajuste os filtros.' : 'Importe do AliExpress em Integrações, cadastre uma oportunidade ou ajuste os filtros.'}
         renderDetail={card => {

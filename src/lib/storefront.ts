@@ -5,6 +5,7 @@ import type { Candidate, CandidateStatus, CandidateSupplier } from './intake.ts'
 import { approvedStudioMedia } from './media-factory.ts';
 import type { PriceCalculation } from './pricing.ts';
 import { fiscalCompletion, type Availability } from './product-fiscal.ts';
+import { isEyewearProduct, normalizeProductText, productMissingTechnical } from './product-filters.ts';
 
 export type CardVariant = { id: string; label: string; detail: string; price: number | null; stock: number | null; imageUrl: string };
 export type StoreCard = {
@@ -14,9 +15,22 @@ export type StoreCard = {
   category: string; url: string; description: string; variants: CardVariant[]; searchText: string;
   // Stock model badge; only master products carry it (candidates have no stock model yet).
   availability?: Availability; fiscalCompletion?: number; sourceDetails?: CandidateSupplier;
+  technicalGaps?: { dimensions: boolean; weight: boolean; material: boolean };
 };
-export type StoreFilters = { query?: string; minCost?: string; maxCost?: string; supplier?: string; state?: string; availability?: string };
+export type StoreFilters = { query?: string; minCost?: string; maxCost?: string; supplier?: string; state?: string; availability?: string; category?: string; eyewearOnly?: boolean; missing?: '' | 'dimensions' | 'weight' | 'material' | 'any' };
 export const NO_AVAILABILITY = 'SEM_DEFINICAO';
+export const NO_CATEGORY = 'SEM_CATEGORIA';
+const measured = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value > 0;
+const dimensionsComplete = (value?: CandidateSupplier['dimensions']) => !!value && measured(value.lengthCm) && measured(value.widthCm) && measured(value.heightCm);
+export function supplierTechnicalGaps(supplier?: CandidateSupplier) {
+  const variants = supplier?.variants ?? [];
+  const single = variants.length <= 1;
+  return {
+    dimensions: !(variants.length ? variants.every(variant => dimensionsComplete({ lengthCm: variant.dimensions?.lengthCm ?? (single ? supplier?.dimensions?.lengthCm : undefined), widthCm: variant.dimensions?.widthCm ?? (single ? supplier?.dimensions?.widthCm : undefined), heightCm: variant.dimensions?.heightCm ?? (single ? supplier?.dimensions?.heightCm : undefined) })) : dimensionsComplete(supplier?.dimensions)),
+    weight: !(variants.length ? variants.every(variant => measured(variant.weightGrams ?? (single ? supplier?.weightGrams : undefined))) : measured(supplier?.weightGrams)),
+    material: !supplier?.materials?.some(value => value.trim()),
+  };
+}
 
 const line = (notes: string, label: string) => notes.split('\n').find(item => item.toLocaleLowerCase('pt-BR').startsWith(`${label}:`))?.slice(label.length + 1).trim() ?? '';
 
@@ -50,9 +64,9 @@ export function candidateCard(candidate: Candidate): StoreCard {
     suggestedPrice: null, priceCurrency: supplier?.currency || legacy.currency || 'BRL',
     stock: supplier?.stock ?? legacy.stock, supplier: supplier?.name || legacy.supplier || (candidate.source === 'TREND' ? 'Trend' : 'Manual'),
     supplierRef: supplier?.ref || legacy.ref, state: candidate.status, stateLabel: candidateStateLabels[candidate.status],
-    category: candidate.category ?? '', url: candidate.url, description: supplier?.description || '', variants, sourceDetails: supplier ?? { name: legacy.supplier || 'Manual', ref: legacy.ref, cost: legacy.cost, currency: legacy.currency || 'BRL', stock: legacy.stock, imageUrl: legacy.imageUrl, images, variants: [] },
+    category: candidate.category ?? '', url: candidate.url, description: supplier?.description || '', variants, technicalGaps: supplierTechnicalGaps(supplier), sourceDetails: supplier ?? { name: legacy.supplier || 'Manual', ref: legacy.ref, cost: legacy.cost, currency: legacy.currency || 'BRL', stock: legacy.stock, imageUrl: legacy.imageUrl, images, variants: [] },
   };
-  return { ...card, searchText: [fullTitle, candidate.url, candidate.notes, card.supplier, card.supplierRef, card.category].join(' ').toLocaleLowerCase('pt-BR') };
+  return { ...card, searchText: [fullTitle, candidate.url, candidate.notes, card.supplier, card.supplierRef, card.category, ...variants.map(variant => `${variant.id} ${variant.label} ${variant.detail}`)].join(' ').toLocaleLowerCase('pt-BR') };
 }
 
 export const curationLabels: Record<CurationStatus | 'PRONTO', string> = { PRONTO: 'Pronto', APROVADO: 'Aprovado', REJEITADO: 'Rejeitado', ARQUIVADO: 'Arquivado' };
@@ -85,9 +99,9 @@ export function productCard(record: CatalogRecord, candidate?: Candidate, curati
     suggestedPrice: price?.price ?? null, priceCurrency: price?.currency ?? cheapest?.currency ?? 'BRL',
     stock: knownStock.length ? knownStock.reduce((sum, item) => sum + (item.stock ?? 0), 0) : origin?.stock ?? null,
     supplier: cheapest?.supplierName ?? origin?.supplier ?? 'Sem fornecedor', supplierRef: cheapest?.supplierRef ?? origin?.supplierRef ?? '',
-    state, stateLabel: curationLabels[state], category: product.category, url: origin?.url ?? '',
+    state, stateLabel: curationLabels[state], category: product.category, url: origin?.url || product.spec?.sourceUrl || '',
     description: product.shortDescription || product.longDescription, variants: variants.length ? variants : origin?.variants ?? [],
-    availability: product.availability, fiscalCompletion: fiscalCompletion(product),
+    availability: product.availability, fiscalCompletion: fiscalCompletion(product), technicalGaps: productMissingTechnical(product),
   };
   const skus = (product.spec?.variants ?? []).map(item => `${item.sku} ${item.title}`);
   return { ...card, searchText: [card.title, card.category, card.supplier, card.supplierRef, ...product.tags, ...skus].join(' ').toLocaleLowerCase('pt-BR') };
@@ -97,13 +111,28 @@ export function productCard(record: CatalogRecord, candidate?: Candidate, curati
 export const ACTIVE_STATES = 'ATIVOS';
 const amount = (value?: string) => { const parsed = value?.trim() ? Number(value.replace(',', '.')) : Number.NaN; return Number.isFinite(parsed) ? parsed : null; };
 export function filterCards(cards: StoreCard[], filters: StoreFilters) {
-  const query = filters.query?.trim().toLocaleLowerCase('pt-BR') ?? '';
+  const query = normalizeProductText(filters.query ?? '');
   const min = amount(filters.minCost); const max = amount(filters.maxCost);
-  return cards.filter(card => (!query || card.searchText.includes(query))
+  return cards.filter(card => (!query || normalizeProductText(card.searchText).includes(query))
     && (min === null || (card.cost !== null && card.cost >= min))
     && (max === null || (card.cost !== null && card.cost <= max))
     && (!filters.supplier || card.supplier === filters.supplier)
+    && (!filters.category || (filters.category === NO_CATEGORY ? !card.category.trim() : normalizeProductText(card.category) === normalizeProductText(filters.category)))
+    && (!filters.eyewearOnly || isEyewearProduct(card.category, card.fullTitle || card.title))
+    && (!filters.missing || (filters.missing === 'any' ? Object.values(card.technicalGaps ?? supplierTechnicalGaps(card.sourceDetails)).some(Boolean) : (card.technicalGaps ?? supplierTechnicalGaps(card.sourceDetails))[filters.missing]))
     && (!filters.state || (filters.state === ACTIVE_STATES ? card.state !== 'ARQUIVADO' : card.state === filters.state))
     && (!filters.availability || (filters.availability === NO_AVAILABILITY ? !card.availability : card.availability === filters.availability)));
 }
 export const suppliersOf = (cards: StoreCard[]) => [...new Set(cards.map(card => card.supplier).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+export const categoriesOf = (cards: StoreCard[]) => [...new Set(cards.map(card => card.category).filter(value => value.trim()))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+
+/** Every filtered result participates; command size stays bounded regardless of pagination. */
+export async function runCardBulk(ids: string[], status: string, reason: string, apply: (ids: string[], status: string, reason: string) => Promise<string>, onProgress?: (completed: string[]) => void) {
+  const unique = [...new Set(ids)];
+  const messages: string[] = []; const completed: string[] = [];
+  for (let offset = 0; offset < unique.length; offset += 200) {
+    const batch = unique.slice(offset, offset + 200);
+    messages.push(await apply(batch, status, reason)); completed.push(...batch); onProgress?.([...completed]);
+  }
+  return messages.join(' ');
+}

@@ -1,4 +1,5 @@
 import type { Candidate } from './intake';
+import type { ProductCompletionRequest } from './product-completion-queue.ts';
 import { normalizeFiscal, normalizeVariantLogistics, type Availability, type ProductFiscal, type VariantLogistics } from './product-fiscal.ts';
 
 export type MasterProductStatus = 'EM_PRODUCAO' | 'PRONTO';
@@ -7,7 +8,7 @@ export type ProductTechnical = { dimensions:{lengthCm:number|null;widthCm:number
 export const emptyTechnical:ProductTechnical={dimensions:{lengthCm:null,widthCm:null,heightCm:null},weightGrams:null,packageDimensions:{lengthCm:null,widthCm:null,heightCm:null},packageWeightGrams:null,model:'',brand:'',features:[],specifications:{},careInstructions:'',includedItems:[],additionalFields:{}};
 export type UniversalProductSpec = { technical?:ProductTechnical; sourceImages?:string[]; sourceUrl?:string; variants:ProductVariant[]; materials:string[]; colors:string[]; sizes:string[]; seo:{title:string;description:string}; compliance:{notes:string;certifications:string[]}; localizations:Record<string,{title:string;description:string}>; destinationGaps:Record<string,string[]> };
 export type MasterProduct = {
-  id: string; candidateId: string; status: MasterProductStatus; version: number;
+  id: string; candidateId: string; status: MasterProductStatus; version: number; archivedAt?: string; archivedReason?: string;
   universalTitle: string; shortDescription: string; longDescription: string;
   category: string; bullets: string[]; benefits: string[]; tags: string[];
   spec?: UniversalProductSpec;
@@ -15,9 +16,9 @@ export type MasterProduct = {
   fiscal?: ProductFiscal; availability?: Availability;
   createdAt: string; updatedAt: string;
 };
-export type ProductEvent = { id: string; productId: string; action: 'PRODUCAO_INICIADA' | 'RASCUNHO_ATUALIZADO' | 'PRODUTO_PRONTO' | 'VERSAO_RESTAURADA' | 'DADOS_FISCAIS_ATUALIZADOS' | 'DISPONIBILIDADE_ALTERADA'; at: string; actor: string; version: number };
+export type ProductEvent = { id: string; productId: string; action: 'PRODUCAO_INICIADA' | 'RASCUNHO_ATUALIZADO' | 'PRODUTO_PRONTO' | 'VERSAO_RESTAURADA' | 'DADOS_FISCAIS_ATUALIZADOS' | 'DISPONIBILIDADE_ALTERADA' | 'PRODUTO_ARQUIVADO'; at: string; actor: string; version: number; reason?: string };
 export type ProductVersionSnapshot={productId:string;version:number;snapshot:MasterProduct;at:string;actor:string};
-export type ProductFactoryState = { version: 1; products: MasterProduct[]; events: ProductEvent[]; versions?:ProductVersionSnapshot[] };
+export type ProductFactoryState = { version: 1; products: MasterProduct[]; events: ProductEvent[]; versions?:ProductVersionSnapshot[]; completionRequests?:ProductCompletionRequest[] };
 export const PRODUCT_STORAGE_KEY = 'ddf.products.demo.v1';
 export const emptyProductFactory: ProductFactoryState = { version: 1, products: [], events: [] };
 export const emptyUniversalSpec:UniversalProductSpec={variants:[],materials:[],colors:[],sizes:[],seo:{title:'',description:''},compliance:{notes:'',certifications:[]},localizations:{},destinationGaps:{}};
@@ -50,7 +51,7 @@ export function startProduct(state: ProductFactoryState, candidate: Candidate, i
 }
 export function updateProduct(state: ProductFactoryState, id: string, input: Pick<MasterProduct, 'universalTitle'|'shortDescription'|'longDescription'|'category'|'bullets'|'benefits'|'tags'> & {spec?:UniversalProductSpec}, at: string, actor = 'Aprovador · controlado'): ProductFactoryState {
   const current = state.products.find(p => p.id === id);
-  if (!current || current.status === 'PRONTO') throw new Error('Este cadastro não está disponível para edição.');
+  if (!current || current.status === 'PRONTO' || current.archivedAt) throw new Error('Este cadastro não está disponível para edição.');
   const clean = (values: string[]) => values.map(v => v.trim()).filter(Boolean);
   const version = current.version + 1;
   const next = { ...current, ...input, spec:input.spec??current.spec??emptyUniversalSpec, universalTitle: input.universalTitle.trim(), shortDescription: input.shortDescription.trim(), longDescription: input.longDescription.trim(), category: input.category.trim(), bullets: clean(input.bullets), benefits: clean(input.benefits), tags: clean(input.tags), version, updatedAt: at };
@@ -62,8 +63,8 @@ export function updateProduct(state: ProductFactoryState, id: string, input: Pic
 export function refreshProductSupplier(state: ProductFactoryState, id: string, candidate: Candidate, at: string, actor: string): ProductFactoryState {
   const current = state.products.find(product => product.id === id);
   if (!current || current.candidateId !== candidate.id) throw new Error('Origem do cadastro não encontrada.');
-  if (current.status === 'PRONTO' || !candidate.supplier) return state;
-  const source = startProduct(emptyProductFactory, candidate, id, at, actor).products[0].spec!;
+  if (current.status === 'PRONTO' || current.archivedAt || !candidate.supplier) return state;
+  const source = startProduct(emptyProductFactory, { ...candidate, status: 'APROVADO' }, id, at, actor).products[0].spec!;
   const spec = structuredClone(current.spec ?? emptyUniversalSpec);
   const technical = spec.technical ?? structuredClone(emptyTechnical);
   const incoming = source.technical!;
@@ -98,7 +99,7 @@ export function refreshProductSupplier(state: ProductFactoryState, id: string, c
 }
 export function markProductReady(state: ProductFactoryState, id: string, at: string, approvedMedia: number, actor = 'Aprovador · controlado'): ProductFactoryState {
   const current = state.products.find(p => p.id === id);
-  if (!current || current.status !== 'EM_PRODUCAO') throw new Error('Produto indisponível para conclusão.');
+  if (!current || current.status !== 'EM_PRODUCAO' || current.archivedAt) throw new Error('Produto indisponível para conclusão.');
   const gaps = productGaps(current); if (gaps.length) throw new Error(`Complete antes de finalizar: ${gaps.join(', ')}.`);
   if (!Number.isFinite(approvedMedia)||approvedMedia<4) throw new Error('São necessárias no mínimo quatro mídias de estúdio aprovadas, fiéis e com ângulos distintos na Media Factory antes de finalizar.');
   const version = current.version + 1;
@@ -143,4 +144,16 @@ export function setProductAvailability(state: ProductFactoryState, id: string, a
   if (availability !== 'PRONTA_ENTREGA' && availability !== 'SOB_ENCOMENDA') throw new Error('Disponibilidade inválida.');
   if (current.availability === availability) return state;
   return versioned(state, current, { ...current, availability }, 'DISPONIBILIDADE_ALTERADA', at, actor);
+}
+
+export function archiveProducts(state: ProductFactoryState, productIds: string[], reason: string, at: string, actor: string): ProductFactoryState {
+  if (!reason.trim()) throw new Error('Informe o motivo do arquivamento.');
+  const selected = new Set(productIds);
+  const products = state.products.filter(product => selected.has(product.id) && product.status === 'EM_PRODUCAO' && !product.archivedAt);
+  if (!products.length) throw new Error('Nenhum cadastro em produção disponível para arquivar.');
+  const updates = new Map(products.map(product => [product.id, { ...product, archivedAt: at, archivedReason: reason.trim(), updatedAt: at, version: product.version + 1 }]));
+  return { ...state, products: state.products.map(product => updates.get(product.id) ?? product),
+    events: [...products.map(product => ({ id: `${product.id}:${product.version + 1}`, productId: product.id, action: 'PRODUTO_ARQUIVADO' as const, at, actor, reason: reason.trim(), version: product.version + 1 })), ...state.events],
+    versions: [...[...updates.values()].map(snapshot => ({ productId: snapshot.id, version: snapshot.version, snapshot, at, actor })), ...(state.versions ?? [])],
+    completionRequests: (state.completionRequests ?? []).map(request => updates.has(request.productId) ? { ...request, status: 'BLOCKED' as const, code: 'product_archived', reason: `Cadastro arquivado: ${reason}`, updatedAt: at } : request) };
 }

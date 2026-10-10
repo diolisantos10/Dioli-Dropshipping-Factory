@@ -2,7 +2,7 @@
 /* eslint-disable @next/next/no-img-element -- supplier and media URLs come from many unknown hosts; next/image would need each one allow-listed. */
 
 import { useEffect, useMemo, useState } from 'react';
-import { filterCards, NO_AVAILABILITY, suppliersOf, type StoreCard, type StoreFilters } from '@/lib/storefront';
+import { categoriesOf, filterCards, NO_AVAILABILITY, NO_CATEGORY, runCardBulk, suppliersOf, type StoreCard, type StoreFilters } from '@/lib/storefront';
 import { availabilityLabels } from '@/lib/product-fiscal';
 
 export type BulkAction = { status: string; label: string; tone?: 'primary' | 'secondary' | 'danger' };
@@ -32,7 +32,7 @@ export function Storefront({ cards, stateOptions, defaultState = '', bulkActions
   // Master products carry a stock model (pronta entrega / sob encomenda); candidates do not.
   showAvailability?: boolean;
 }) {
-  const [filters, setFilters] = useState<StoreFilters>({ query: '', minCost: '', maxCost: '', supplier: '', state: defaultState, availability: '' });
+  const [filters, setFilters] = useState<StoreFilters>({ query: '', minCost: '', maxCost: '', supplier: '', state: defaultState, availability: '', category: '', eyewearOnly: false, missing: '' });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<BulkAction | null>(null);
   const [reason, setReason] = useState('Decisão em massa pela vitrine');
@@ -41,6 +41,7 @@ export function Storefront({ cards, stateOptions, defaultState = '', bulkActions
   const [openId, setOpenId] = useState<string | null>(null);
   const [limit, setLimit] = useState(PAGE);
 
+  const categories = useMemo(() => categoriesOf(cards), [cards]);
   const suppliers = useMemo(() => suppliersOf(cards), [cards]);
   const visible = useMemo(() => filterCards(cards, filters), [cards, filters]);
   const shown = visible.slice(0, limit);
@@ -48,17 +49,18 @@ export function Storefront({ cards, stateOptions, defaultState = '', bulkActions
   const selectedVisible = visible.filter(card => selected.has(card.id));
   const allSelected = visible.length > 0 && selectedVisible.length === visible.length;
 
-  const update = (patch: Partial<StoreFilters>) => { setFilters(current => ({ ...current, ...patch })); setLimit(PAGE); };
+  const update = (patch: Partial<StoreFilters>) => { setFilters(current => ({ ...current, ...patch })); setLimit(PAGE); setSelected(new Set()); setPending(null); };
   const toggle = (id: string) => setSelected(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(visible.map(card => card.id)));
 
   async function confirm() {
-    if (!pending || !selectedVisible.length) return;
+    if (busy || !pending || !selectedVisible.length) return;
     setBusy(true); setFeedback(null);
+    let processed: string[] = [];
     try {
-      const text = await onBulk(selectedVisible.map(card => card.id), pending.status, reason);
+      const text = await runCardBulk(selectedVisible.map(card => card.id), pending.status, reason, onBulk, completed => { processed = completed; });
       setFeedback({ kind: 'ok', text }); setSelected(new Set()); setPending(null);
-    } catch (cause) { setFeedback({ kind: 'error', text: cause instanceof Error ? cause.message : 'Não foi possível concluir.' }); }
+    } catch (cause) { setSelected(current => new Set([...current].filter(id => !processed.includes(id)))); setFeedback({ kind: 'error', text: `${processed.length ? `${processed.length} item(ns) já enviado(s). Os demais continuam selecionados. ` : ''}${cause instanceof Error ? cause.message : 'Não foi possível concluir.'}` }); }
     finally { setBusy(false); }
   }
 
@@ -68,6 +70,9 @@ export function Storefront({ cards, stateOptions, defaultState = '', bulkActions
       <label className="text-sm">Custo mínimo<input className="ddf-input" inputMode="decimal" value={filters.minCost} onChange={event => update({ minCost: event.target.value })} placeholder="0,00" /></label>
       <label className="text-sm">Custo máximo<input className="ddf-input" inputMode="decimal" value={filters.maxCost} onChange={event => update({ maxCost: event.target.value })} placeholder="999,00" /></label>
       <label className="text-sm">Fornecedor<select className="ddf-input" value={filters.supplier} onChange={event => update({ supplier: event.target.value })}><option value="">Todos</option>{suppliers.map(name => <option key={name} value={name}>{name}</option>)}</select></label>
+      <label className="text-sm">Categoria<select className="ddf-input" value={filters.category} onChange={event => update({ category: event.target.value })}><option value="">Todas as categorias</option><option value={NO_CATEGORY}>Sem categoria informada</option>{categories.map(name => <option key={name} value={name}>{name}</option>)}</select></label>
+      <label className="text-sm">Pendência técnica<select className="ddf-input" value={filters.missing} onChange={event => update({ missing: event.target.value as StoreFilters['missing'] })}><option value="">Todas as fichas</option><option value="any">Qualquer pendência técnica</option><option value="dimensions">Dimensões incompletas</option><option value="weight">Peso incompleto</option><option value="material">Material ausente</option></select></label>
+      <button type="button" className={`ddf-button self-end ${filters.eyewearOnly ? '' : 'secondary'}`} aria-pressed={!!filters.eyewearOnly} onClick={() => update({ eyewearOnly: !filters.eyewearOnly })}>Somente óculos</button>
       <label className="text-sm">Estado<select className="ddf-input" value={filters.state} onChange={event => update({ state: event.target.value })}>{stateOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
       {showAvailability && <label className="text-sm">Disponibilidade<select className="ddf-input" value={filters.availability} onChange={event => update({ availability: event.target.value })}><option value="">Todas</option><option value="PRONTA_ENTREGA">{availabilityLabels.PRONTA_ENTREGA}</option><option value="SOB_ENCOMENDA">{availabilityLabels.SOB_ENCOMENDA}</option><option value={NO_AVAILABILITY}>Sem definição</option></select></label>}
     </section>
@@ -75,8 +80,8 @@ export function Storefront({ cards, stateOptions, defaultState = '', bulkActions
     <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
       <p className="text-[var(--muted)]" aria-live="polite">{loading ? 'Carregando do servidor…' : `${visible.length} de ${cards.length} produto(s)`}</p>
       <div className="flex flex-wrap items-center gap-3">
-        <label className="flex min-h-11 items-center gap-2"><input type="checkbox" className="h-5 w-5 accent-[var(--accent)]" checked={allSelected} onChange={toggleAll} disabled={!visible.length} /> Selecionar todos ({visible.length})</label>
-        {(filters.query || filters.minCost || filters.maxCost || filters.supplier || filters.availability || filters.state !== defaultState) && <button className="ddf-button secondary" onClick={() => { setFilters({ query: '', minCost: '', maxCost: '', supplier: '', state: defaultState, availability: '' }); setLimit(PAGE); }}>Limpar filtros</button>}
+        <label className="flex min-h-11 items-center gap-2"><input type="checkbox" className="h-5 w-5 accent-[var(--accent)]" checked={allSelected} onChange={toggleAll} disabled={!visible.length || busy} /> Selecionar todos no filtro ({visible.length})</label>
+        {(filters.query || filters.minCost || filters.maxCost || filters.supplier || filters.category || filters.eyewearOnly || filters.missing || filters.availability || filters.state !== defaultState) && <button className="ddf-button secondary" onClick={() => { setFilters({ query: '', minCost: '', maxCost: '', supplier: '', state: defaultState, availability: '', category: '', eyewearOnly: false, missing: '' }); setLimit(PAGE); setSelected(new Set()); setPending(null); }}>Limpar filtros</button>}
       </div>
     </div>
 
@@ -87,7 +92,7 @@ export function Storefront({ cards, stateOptions, defaultState = '', bulkActions
     <ul className="grid grid-cols-2 gap-3 sm:gap-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6" aria-label="Produtos">
       {shown.map(card => <li key={card.id} className={`surface group relative flex flex-col overflow-hidden transition-shadow hover:shadow-lg ${selected.has(card.id) ? 'ring-2 ring-[var(--ink)] ring-offset-2 ring-offset-[var(--accent)]' : ''}`}>
         <label className="absolute left-2 top-2 z-10 grid h-10 w-10 cursor-pointer place-items-center rounded-full bg-white/90 shadow" title="Selecionar">
-          <input type="checkbox" className="h-5 w-5 accent-[var(--accent)]" checked={selected.has(card.id)} onChange={() => toggle(card.id)} aria-label={`Selecionar ${card.title}`} />
+          <input type="checkbox" className="h-5 w-5 accent-[var(--accent)]" checked={selected.has(card.id)} disabled={busy} onChange={() => toggle(card.id)} aria-label={`Selecionar ${card.title}`} />
         </label>
         <button type="button" className="flex flex-1 flex-col text-left" onClick={() => setOpenId(card.id)} aria-label={`Abrir detalhes de ${card.title}`}>
           <div className="relative aspect-[5/4] w-full overflow-hidden bg-stone-100">
@@ -107,6 +112,7 @@ export function Storefront({ cards, stateOptions, defaultState = '', bulkActions
             </div>
           </div>
         </button>
+        {card.url && <a className="mx-3 mb-3 inline-flex min-h-9 items-center text-xs font-medium underline" href={card.url} target="_blank" rel="noreferrer noopener">Abrir produto no fornecedor ↗</a>}
       </li>)}
     </ul>
     {visible.length > shown.length && <div className="text-center"><button className="ddf-button secondary" onClick={() => setLimit(limit + PAGE)}>Mostrar mais ({visible.length - shown.length})</button></div>}
