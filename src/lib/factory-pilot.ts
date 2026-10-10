@@ -13,7 +13,7 @@ import { persistSupplierOriginals } from './supplier-media-archive';
 import { runStudioProduction } from './studio-worker';
 
 type Connection = { id: string; name: string };
-type PilotCheckpoint = { candidateId?: string; productId?: string; stage?: string; code?: string; failed?: boolean; editorial?: boolean; retryRevision?: string };
+type PilotCheckpoint = { candidateId?: string; productId?: string; stage?: string; code?: string; failed?: boolean; editorial?: boolean; retryRevision?: string; sourceCount?: number; sourceRead?: number };
 export function selectPilotSupplier(connections: Connection[], preferred?: string) {
   if (preferred) return connections.find(item => item.name.toLocaleLowerCase() === preferred.toLocaleLowerCase());
   const branded = connections.filter(item => /sanchio|santioh/i.test(item.name));
@@ -41,11 +41,13 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
   const retryRevision = process.env.DDF_PILOT_RETRY_REVISION?.trim();
   // Operator explicitly acknowledges one technical routing repair. This cannot retry paid image work,
   // budget/access failures, or the same revision twice, even when the attempted repair also fails.
-  const routingRetry = prior?.failed && prior.code === 'gateway_provider_invalid_request' && prior.stage === 'SOURCE'
+  const reviewedRepair = prior?.code === 'gateway_provider_invalid_request'
+    || (['gateway_unavailable', 'gateway_provider_timeout'].includes(prior?.code ?? '') && /^vision-latency-repair-/.test(retryRevision ?? ''));
+  const sourceRetry = prior?.failed && reviewedRepair && prior.stage === 'SOURCE'
     && !!retryRevision && /^[a-zA-Z0-9_-]{1,80}$/.test(retryRevision) && retryRevision !== prior.retryRevision;
-  if (prior?.failed && !routingRetry) return { blocked: 1, stage: prior.stage, code: prior.code, reason: 'pilot_failed_requires_review' };
+  if (prior?.failed && !sourceRetry) return { blocked: 1, stage: prior.stage, code: prior.code, reason: 'pilot_failed_requires_review' };
   const checkpoint: PilotCheckpoint = { ...prior };
-  if (routingRetry) {
+  if (sourceRetry) {
     checkpoint.failed = false;
     delete checkpoint.code;
     checkpoint.retryRevision = retryRevision;
@@ -61,6 +63,8 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
     await db.query(`INSERT INTO factory_production_runs(candidate_id,product_id,status,stage,detail,attempts)
       VALUES($1,$2,$3,$4,$5,1) ON CONFLICT(candidate_id) DO UPDATE SET product_id=$2,status=$3,stage=$4,detail=$5,updated_at=now()`,
     [key, checkpoint.productId ?? null, status, stage, JSON.stringify({ ...checkpoint, ...extra })]);
+    console.info('DDF_FACTORY_PILOT', JSON.stringify({ status, stage, sourceCount: Number(extra.sourceCount ?? checkpoint.sourceCount ?? 0), sourceRead: Number(extra.sourceRead ?? checkpoint.sourceRead ?? 0),
+      approvedPhotos: Number(extra.approvedPhotos ?? 0), gapCount: Number(extra.gapCount ?? 0), ...(typeof extra.code === 'string' ? { code: extra.code.replace(/[^a-z0-9_]/g, '') } : {}) }));
     return { stage, ...extra };
   };
   const loadIntake = async () => ((await readState('intake'))?.payload ?? emptyIntake) as IntakeState;
@@ -92,9 +96,12 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
     checkpoint.stage = 'SOURCE';
     const supplier = supplierForImageReading(candidate);
     if (!supplier?.images.length) return save('BLOCKED', 'SOURCE', { blocked: 1, code: 'source_images_missing', sourceCount: 0 });
+    checkpoint.sourceCount = supplier.images.length;
+    checkpoint.sourceRead = supplier.vision?.processedImages.length ?? 0;
     const read = await readSupplierImages(supplier, `candidate:${candidate.id}:pilot`, generateGatewayText);
     await command('intake.refreshSupplier', { candidateId: candidate.id, supplier: read }, true);
     const counts = { sourceCount: read.images.length, sourceRead: read.vision?.processedImages.length ?? 0 };
+    Object.assign(checkpoint, counts);
     if (!read.vision?.completed) return save('PROCESSING', 'SOURCE', { ...counts, continuing: 1 });
     candidate = (await loadIntake()).candidates.find(item => item.id === candidate!.id)!;
     if (candidate.status === 'INFORMACAO_SOLICITADA') return save('BLOCKED', 'SOURCE', { ...counts, blocked: 1, code: 'pilot_origin_requires_review' });
@@ -149,6 +156,6 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
   } catch (error) {
     checkpoint.failed = true;
     checkpoint.code = pilotErrorCode(error);
-    return save('FAILED', checkpoint.stage ?? 'SUPPLIER', { failed: 1, code: checkpoint.code });
+    return save('FAILED', checkpoint.stage ?? 'SUPPLIER', { failed: 1, code: checkpoint.code, sourceCount: checkpoint.sourceCount ?? 0, sourceRead: checkpoint.sourceRead ?? 0 });
   }
 }

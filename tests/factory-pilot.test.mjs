@@ -100,3 +100,28 @@ test('operator revision cannot reset paid STUDIO or access and budget failures',
     assert.equal(fx.calls, 0);
   }
 });
+
+test('reviewed vision latency repair retries SOURCE timeout once with its explicit revision only', async t => {
+  const candidate = { id: 'c', status: 'CANDIDATO', supplier: { ref: '1005013226256365', images: ['https://ae01.alicdn.com/source.png'] } };
+  for (const code of ['gateway_unavailable', 'gateway_provider_timeout']) {
+    const denied = fixture(t, { candidate, prior: { candidateId: 'c', failed: true, stage: 'SOURCE', code } });
+    process.env.DDF_PILOT_RETRY_REVISION = 'routing-repair-2';
+    assert.equal((await load(denied.deps).runFactoryPilot('cron', 'corr')).reason, 'pilot_failed_requires_review');
+    const fx = fixture(t, { candidate, prior: { candidateId: 'c', failed: true, stage: 'SOURCE', code } });
+    process.env.DDF_PILOT_RETRY_REVISION = 'vision-latency-repair-1';
+    let reads = 0;
+    fx.deps['./providers/supplier-vision.ts'] = { readSupplierImages: async () => {
+      reads++;
+      assert.equal(fx.saved.retryRevision, 'vision-latency-repair-1');
+      const error = new fx.deps['./ai-gateway'].GatewayError('timed out'); error.code = code; throw error;
+    } };
+    const result = await load(fx.deps).runFactoryPilot('cron', 'corr');
+    assert.equal(result.failed, 1);
+    assert.equal(result.sourceCount, 1);
+    assert.equal(result.sourceRead, 0);
+    assert.equal(reads, 1);
+    const second = fixture(t, { candidate, prior: fx.saved });
+    process.env.DDF_PILOT_RETRY_REVISION = 'vision-latency-repair-1';
+    assert.equal((await load(second.deps).runFactoryPilot('cron', 'corr')).reason, 'pilot_failed_requires_review');
+  }
+});

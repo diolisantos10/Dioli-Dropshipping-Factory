@@ -9,6 +9,7 @@ const output = facts => ({ text: JSON.stringify({ facts }), providerId: 'openai'
 test('visão preenche só medidas explícitas, com fonte, e não troca unidade sem conversão', async () => {
   const enriched = await readSupplierImages(base, 'candidate:1', async request => {
     assert.equal(request.roleAddress, 'dioli.ddf.supplier-import');
+    assert.equal(request.timeoutMs, 200_000);
     assert.deepEqual(request.referenceImages, base.images);
     return output([{ imageUrl: base.imageUrl, sku: null, quote: 'Width: 120 mm\nNet weight: 0.2 kg' }]);
   });
