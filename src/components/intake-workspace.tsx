@@ -7,6 +7,7 @@ import { command, errorMessage, sendCommand } from '@/lib/command-client';
 import { candidateCard, candidateStateLabels as labels } from '@/lib/storefront';
 import { Storefront, type BulkAction, type StateOption } from '@/components/storefront';
 import { useServerStates } from '@/components/use-server-states';
+import { ManualPilotExport } from '@/components/manual-pilot-export';
 
 const NAMESPACES = ['intake'] as const;
 const TRIAGE_STATES: CandidateStatus[] = ['TRIADO', 'INFORMACAO_SOLICITADA'];
@@ -50,6 +51,7 @@ export function IntakeWorkspace({ mode }: { mode: 'intake' | 'triage' | 'audit' 
     {(error || loadError) && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border border-red-300 bg-red-50 p-4 text-red-800"><span>{error || loadError}</span>{loadError && <button className="ddf-button secondary" onClick={reload}>Tentar de novo</button>}</div>}
     <p role="status" className="text-sm text-green-800">{message}</p>
     {!ready ? <p className="surface p-6 text-sm">Carregando dados do servidor…</p> : <>
+      {(mode === 'intake' || mode === 'triage') && status === 'ready' && <ManualPilotExport candidates={pool} />}
       {mode === 'overview' && <><section className="grid gap-4 sm:grid-cols-3">{(['CANDIDATO', 'TRIADO', 'APROVADO'] as CandidateStatus[]).map(value => <article key={value} className="surface p-6"><h2>{labels[value]}</h2><p className="mt-4 text-4xl font-semibold">{state.candidates.filter(c => c.status === value).length}</p></article>)}</section><div className="flex flex-wrap gap-3"><Link className="ddf-button" href="/prateleira-bruta">Cadastrar oportunidade</Link><Link className="ddf-button secondary" href="/triagem">Revisar pendências</Link><Link className="ddf-button secondary" href="/auditoria">Ver histórico</Link></div></>}
       {mode === 'intake' && <details className="surface p-5">
         <summary className="cursor-pointer font-semibold">Adicionar oportunidade manual</summary>

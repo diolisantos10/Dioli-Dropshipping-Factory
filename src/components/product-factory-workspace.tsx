@@ -6,6 +6,7 @@ import { command, errorMessage, sendCommand, type Command } from '@/lib/command-
 import { candidateCard } from '@/lib/storefront';
 import { baseTaxonomy } from '@/lib/taxonomy';
 import { useServerStates } from '@/components/use-server-states';
+import { ManualPilotExport } from '@/components/manual-pilot-export';
 import { FiscalPanel } from '@/components/fiscal-form';
 import { approvedStudioAssets } from '@/lib/media-factory';
 import { availabilityLabels } from '@/lib/product-fiscal';
@@ -94,6 +95,7 @@ export function ProductFactoryWorkspace({ mode }: { mode: 'factory' | 'catalog' 
     <p className="surface p-4 text-sm">Produto mestre não contém fornecedor, preço, canal ou publicação. Essas decisões permanecem independentes.</p>
     {(error || loadError) && <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border border-red-300 bg-red-50 p-4 text-red-800"><span>{error || loadError}</span>{loadError && <button className="ddf-button secondary" onClick={reload}>Tentar de novo</button>}</div>}<p role="status" className="text-sm text-green-800">{message}</p>
     {!ready ? <p className="surface p-6 text-sm">Carregando dados do servidor…</p> : <>
+    {mode === 'factory' && status === 'ready' && <ManualPilotExport candidates={data.intake.candidates.filter(candidate => candidate.status === 'APROVADO' || data.factory.products.some(product => product.candidateId === candidate.id && !product.archivedAt))} products={data.factory.products} />}
     {mode === 'factory' && <section className="space-y-3"><div className="section-heading"><div><h2>Fila aprovada</h2><p>{approved.length} de {allApproved.length} candidato(s) aprovado(s) no filtro aguardando produção.</p></div></div>
       {approved.length === 0 ? <p className="surface p-6 text-sm">Nenhum candidato aprovado aguardando produção.</p> : <ul className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">{approved.map(c => { const card = candidates.get(c.id); return <li key={c.id} className="surface flex flex-col overflow-hidden"><Photo url={card?.imageUrl ?? ''} /><div className="flex flex-1 flex-col gap-2 p-3"><h3 className="line-clamp-2 text-sm font-semibold leading-snug" title={c.fullName || c.name}>{c.name}</h3><p className="text-xs text-[var(--muted)]">Aprovado na triagem · {card?.supplier}</p><button className="ddf-button mt-auto !w-full !px-3 text-sm" onClick={() => act(command('products.start', { candidateId: c.id }), 'Produção iniciada. Nenhuma operação externa foi acionada.')}>Iniciar produção</button></div></li>; })}</ul>}
     </section>}
