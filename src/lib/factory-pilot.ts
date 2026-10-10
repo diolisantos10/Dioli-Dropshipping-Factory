@@ -13,7 +13,16 @@ import { persistSupplierOriginals } from './supplier-media-archive';
 import { runStudioProduction } from './studio-worker';
 
 type Connection = { id: string; name: string };
-type PilotCheckpoint = { candidateId?: string; productId?: string; stage?: string; code?: string; failed?: boolean; editorial?: boolean; retryRevision?: string; sourceCount?: number; sourceRead?: number };
+type PilotCheckpoint = { candidateId?: string; productId?: string; stage?: string; code?: string; failed?: boolean; editorial?: boolean; retryRevision?: string; sourceCount?: number; sourceRead?: number; studio?: { results?: { code?: unknown }[] } };
+const SAFE_GAPS = new Set(['Título universal', 'Categoria', 'Descrição curta', 'Descrição longa', 'Material', 'Peso confirmado de cada item', 'Dimensões confirmadas de cada item']);
+export function safePilotCode(value: unknown) {
+  if (typeof value !== 'string') return undefined;
+  return /^(?:gateway_(?:not_configured|invalid_configuration|invalid_request|unavailable|invalid_response|pairing_required|policy_blocked|execution_failed)|gateway_provider_(?:invalid_request|unavailable|timeout|access_denied|budget_exceeded)(?:_http_\d{3})?|studio_(?:invalid_review|missing_references|variant_mismatch|unsupported_view|duplicate_image|execution_failed|checkpoint_failed)|pilot_studio_requires_review)$/.test(value) ? value : undefined;
+}
+export function storedStudioFailureCode(error: unknown) {
+  if (typeof error !== 'string') return undefined;
+  return safePilotCode(error.match(/^Produção não concluída \(([a-z0-9_]+)\); nenhuma foto foi presumida aprovada\.$/)?.[1]);
+}
 export function selectPilotSupplier(connections: Connection[], preferred?: string) {
   if (preferred) return connections.find(item => item.name.toLocaleLowerCase() === preferred.toLocaleLowerCase());
   const branded = connections.filter(item => /sanchio|santioh/i.test(item.name));
@@ -45,7 +54,21 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
     || (['gateway_unavailable', 'gateway_provider_timeout'].includes(prior?.code ?? '') && /^vision-latency-repair-/.test(retryRevision ?? ''));
   const sourceRetry = prior?.failed && reviewedRepair && prior.stage === 'SOURCE'
     && !!retryRevision && /^[a-zA-Z0-9_-]{1,80}$/.test(retryRevision) && retryRevision !== prior.retryRevision;
-  if (prior?.failed && !sourceRetry) return { blocked: 1, stage: prior.stage, code: prior.code, reason: 'pilot_failed_requires_review' };
+  if (prior?.failed && !sourceRetry) {
+    let code = safePilotCode(prior.code) ?? prior.studio?.results?.map(item => safePilotCode(item.code)).find(Boolean), approvedPhotos = 0;
+    let gaps: string[] = [];
+    if (prior.stage === 'STUDIO' && prior.productId) {
+      const media = ((await readState('media'))?.payload ?? emptyMedia) as MediaState;
+      const product = (((await readState('products'))?.payload ?? emptyProductFactory) as ProductFactoryState).products.find(item => item.id === prior.productId);
+      code = code ?? storedStudioFailureCode(media.productionRequests?.find(item => item.productId === prior.productId)?.error);
+      approvedPhotos = approvedStudioAssets(media, prior.productId).length;
+      gaps = product ? productGaps(product).filter(gap => SAFE_GAPS.has(gap)) : [];
+    }
+    const summary = { blocked: 1, stage: prior.stage, code: code ?? 'pilot_failed_requires_review', sourceCount: prior.sourceCount ?? 0, sourceRead: prior.sourceRead ?? 0,
+      approvedPhotos, gapCount: gaps.length, gaps, reason: 'pilot_failed_requires_review' };
+    console.info('DDF_FACTORY_PILOT', JSON.stringify({ status: 'BLOCKED', stage: summary.stage, code: summary.code, sourceCount: summary.sourceCount, sourceRead: summary.sourceRead, approvedPhotos, gapCount: gaps.length, gaps }));
+    return summary;
+  }
   const checkpoint: PilotCheckpoint = { ...prior };
   if (sourceRetry) {
     checkpoint.failed = false;
@@ -64,7 +87,7 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
       VALUES($1,$2,$3,$4,$5,1) ON CONFLICT(candidate_id) DO UPDATE SET product_id=$2,status=$3,stage=$4,detail=$5,updated_at=now()`,
     [key, checkpoint.productId ?? null, status, stage, JSON.stringify({ ...checkpoint, ...extra })]);
     console.info('DDF_FACTORY_PILOT', JSON.stringify({ status, stage, sourceCount: Number(extra.sourceCount ?? checkpoint.sourceCount ?? 0), sourceRead: Number(extra.sourceRead ?? checkpoint.sourceRead ?? 0),
-      approvedPhotos: Number(extra.approvedPhotos ?? 0), gapCount: Number(extra.gapCount ?? 0), ...(typeof extra.code === 'string' ? { code: extra.code.replace(/[^a-z0-9_]/g, '') } : {}) }));
+      approvedPhotos: Number(extra.approvedPhotos ?? 0), gapCount: Number(extra.gapCount ?? 0), gaps: Array.isArray(extra.gaps) ? extra.gaps.filter(gap => typeof gap === 'string' && SAFE_GAPS.has(gap)) : [], ...(typeof extra.code === 'string' ? { code: extra.code.replace(/[^a-z0-9_]/g, '') } : {}) }));
     return { stage, ...extra };
   };
   const loadIntake = async () => ((await readState('intake'))?.payload ?? emptyIntake) as IntakeState;
@@ -137,7 +160,10 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
       if (archive.remaining) return save('BLOCKED', 'ARCHIVE', { ...counts, blocked: 1, code: 'source_archive_pending', remainingSources: archive.remaining });
       checkpoint.stage = 'STUDIO';
       const queue = (await loadMedia()).productionRequests?.find(item => item.productId === product!.id);
-      if (queue && ['FALHOU', 'BLOQUEADO'].includes(queue.status)) return save('BLOCKED', 'STUDIO', { ...counts, blocked: 1, code: 'pilot_studio_requires_review' });
+      if (queue && ['FALHOU', 'BLOQUEADO'].includes(queue.status)) {
+        const currentGaps = productGaps(product).filter(gap => SAFE_GAPS.has(gap));
+        return save('BLOCKED', 'STUDIO', { ...counts, blocked: 1, code: storedStudioFailureCode(queue.error) ?? 'pilot_studio_requires_review', gapCount: currentGaps.length, gaps: currentGaps });
+      }
       if (!queue) await command('media.bulkSendToMedia', { productIds: [product.id] });
       const studio = await runStudioProduction(correlationId, [product.id]);
       const media = await loadMedia();
@@ -145,9 +171,11 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
       const gaps = productGaps(product);
       const approvedPhotos = approvedStudioAssets(media, product.id).length;
       const ready = studioReadiness(media, product.id).ready;
+      const studioCode = studio.results?.map(item => 'code' in item ? safePilotCode(item.code) : undefined).find(Boolean);
+      if (studio.failed) { checkpoint.failed = true; checkpoint.code = studioCode ?? 'studio_execution_failed'; }
       if (ready && !gaps.length) await command('products.markReady', { productId: product.id }, true);
       return save(ready && !gaps.length ? 'READY' : studio.failed ? 'FAILED' : 'BLOCKED', ready ? 'PRODUCT' : 'STUDIO',
-        { ...counts, approvedPhotos, gapCount: gaps.length, gaps, ready: ready && !gaps.length ? 1 : 0, failed: studio.failed ?? 0, blocked: studio.blocked ?? 0, studio });
+        { ...counts, approvedPhotos, gapCount: gaps.length, gaps, ...(studioCode ? { code: studioCode } : {}), ready: ready && !gaps.length ? 1 : 0, failed: studio.failed ?? 0, blocked: studio.blocked ?? 0, studio });
     }
     const media = await loadMedia();
     const gaps = productGaps(product);

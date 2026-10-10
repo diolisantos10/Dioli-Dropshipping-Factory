@@ -125,3 +125,20 @@ test('reviewed vision latency repair retries SOURCE timeout once with its explic
     assert.equal((await load(second.deps).runFactoryPilot('cron', 'corr')).reason, 'pilot_failed_requires_review');
   }
 });
+
+test('stored failed studio reveals only its safe code and technical gap labels without paid retry', async t => {
+  const fx = fixture(t, { prior: { productId: 'pilot', failed: true, stage: 'STUDIO', sourceCount: 17, sourceRead: 17 } });
+  fx.deps['./server-state'].readState = async namespace => ({ payload: namespace === 'media'
+    ? { assets: [], productionRequests: [{ productId: 'pilot', status: 'FALHOU', error: 'Produção não concluída (studio_variant_mismatch); nenhuma foto foi presumida aprovada.' }] }
+    : { products: [{ id: 'pilot' }], events: [] } });
+  fx.deps['./media-factory'] = { approvedStudioAssets: () => [] };
+  fx.deps['./product-factory'].productGaps = () => ['Peso confirmado de cada item', 'Dimensões confirmadas de cada item', 'PRIVATE PRODUCT FIELD'];
+  const logs = [], priorLog = console.info;
+  console.info = (...args) => logs.push(args.join(' ')); t.after(() => { console.info = priorLog; });
+  const result = await load(fx.deps).runFactoryPilot('cron', 'corr');
+  assert.equal(result.code, 'studio_variant_mismatch');
+  assert.equal(result.sourceRead, 17); assert.equal(result.gapCount, 2);
+  assert.deepEqual(result.gaps, ['Peso confirmado de cada item', 'Dimensões confirmadas de cada item']);
+  assert.equal(fx.calls, 0); assert.ok(logs.every(line => !line.includes('PRIVATE')));
+  assert.equal(load({}).storedStudioFailureCode('Produção não concluída (secret_value); nenhuma foto foi presumida aprovada.'), undefined);
+});
