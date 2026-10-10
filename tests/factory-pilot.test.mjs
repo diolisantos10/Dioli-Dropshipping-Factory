@@ -13,13 +13,17 @@ function load(deps) {
 }
 function fixture(t, { candidate, prior } = {}) {
   const previous = process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID;
+  const previousRetry = process.env.DDF_PILOT_RETRY_REVISION;
+  delete process.env.DDF_PILOT_RETRY_REVISION;
   process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID = '1005013226256365';
   t.after(() => { if (previous === undefined) delete process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID; else process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID = previous; });
+  t.after(() => { if (previousRetry === undefined) delete process.env.DDF_PILOT_RETRY_REVISION; else process.env.DDF_PILOT_RETRY_REVISION = previousRetry; });
   let saved, calls = 0;
   const deps = {
     './server-state': { getDatabasePool: async () => ({ query: async (sql, args) => {
       if (sql.startsWith('SELECT detail')) return { rows: prior ? [{ detail: prior }] : [] };
       if (sql.startsWith('INSERT')) saved = JSON.parse(args[4]);
+      if (sql.startsWith('UPDATE')) saved = JSON.parse(args[1]);
       return { rows: [] };
     } }), readState: async namespace => ({ payload: namespace === 'intake' ? { candidates: candidate ? [candidate] : [] } : { products: [], events: [] } }) },
     './command-runner': { runServerCommand: async (_name, input) => { calls++; if (input.supplier) candidate.supplier = input.supplier; } },
@@ -62,4 +66,37 @@ test('partial gallery checkpoints source reading without approving or generating
   assert.equal(candidate.status, 'CANDIDATO');
   assert.equal(fx.calls, 1);
   assert.equal(reads, 1);
+});
+
+test('operator revision consumes exactly one SOURCE routing retry and another failure freezes', async t => {
+  const candidate = { id: 'c', status: 'CANDIDATO', supplier: { ref: '1005013226256365', images: ['https://ae01.alicdn.com/source.png'] } };
+  const fx = fixture(t, { candidate, prior: { candidateId: 'c', failed: true, stage: 'SOURCE', code: 'gateway_provider_invalid_request' } });
+  process.env.DDF_PILOT_RETRY_REVISION = 'routing-repair-1';
+  let reads = 0;
+  fx.deps['./providers/supplier-vision.ts'] = { readSupplierImages: async () => {
+    reads++;
+    assert.equal(fx.saved.retryRevision, 'routing-repair-1');
+    assert.equal(fx.saved.failed, true, 'reset is consumed before gateway call');
+    const error = new fx.deps['./ai-gateway'].GatewayError('routing rejected');
+    error.code = 'gateway_provider_invalid_request';
+    throw error;
+  } };
+  const result = await load(fx.deps).runFactoryPilot('cron', 'corr');
+  assert.equal(result.failed, 1);
+  assert.equal(reads, 1);
+  assert.equal(Boolean(fx.saved.failed), true);
+  assert.equal(fx.saved.retryRevision, 'routing-repair-1');
+  const second = fixture(t, { candidate, prior: fx.saved });
+  process.env.DDF_PILOT_RETRY_REVISION = 'routing-repair-1';
+  second.deps['./providers/supplier-vision.ts'] = { readSupplierImages: async () => assert.fail('Revision must not repeat') };
+  assert.equal((await load(second.deps).runFactoryPilot('cron', 'corr')).reason, 'pilot_failed_requires_review');
+});
+
+test('operator revision cannot reset paid STUDIO or access and budget failures', async t => {
+  for (const [stage, code] of [['STUDIO', 'gateway_provider_invalid_request'], ['SOURCE', 'gateway_provider_access_denied'], ['SOURCE', 'gateway_provider_budget_exceeded']]) {
+    const fx = fixture(t, { prior: { failed: true, stage, code } });
+    process.env.DDF_PILOT_RETRY_REVISION = 'routing-repair-2';
+    assert.equal((await load(fx.deps).runFactoryPilot('cron', 'corr')).reason, 'pilot_failed_requires_review');
+    assert.equal(fx.calls, 0);
+  }
 });

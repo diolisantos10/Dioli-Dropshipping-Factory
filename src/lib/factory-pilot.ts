@@ -13,7 +13,7 @@ import { persistSupplierOriginals } from './supplier-media-archive';
 import { runStudioProduction } from './studio-worker';
 
 type Connection = { id: string; name: string };
-type PilotCheckpoint = { candidateId?: string; productId?: string; stage?: string; code?: string; failed?: boolean; editorial?: boolean };
+type PilotCheckpoint = { candidateId?: string; productId?: string; stage?: string; code?: string; failed?: boolean; editorial?: boolean; retryRevision?: string };
 export function selectPilotSupplier(connections: Connection[], preferred?: string) {
   if (preferred) return connections.find(item => item.name.toLocaleLowerCase() === preferred.toLocaleLowerCase());
   const branded = connections.filter(item => /sanchio|santioh/i.test(item.name));
@@ -38,8 +38,20 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
   const db = await getDatabasePool();
   const key = `pilot:aliexpress:${itemId}`;
   const prior = (await db.query('SELECT detail FROM factory_production_runs WHERE candidate_id=$1', [key])).rows[0]?.detail as PilotCheckpoint | undefined;
-  if (prior?.failed) return { blocked: 1, stage: prior.stage, code: prior.code, reason: 'pilot_failed_requires_review' };
+  const retryRevision = process.env.DDF_PILOT_RETRY_REVISION?.trim();
+  // Operator explicitly acknowledges one technical routing repair. This cannot retry paid image work,
+  // budget/access failures, or the same revision twice, even when the attempted repair also fails.
+  const routingRetry = prior?.failed && prior.code === 'gateway_provider_invalid_request' && prior.stage === 'SOURCE'
+    && !!retryRevision && /^[a-zA-Z0-9_-]{1,80}$/.test(retryRevision) && retryRevision !== prior.retryRevision;
+  if (prior?.failed && !routingRetry) return { blocked: 1, stage: prior.stage, code: prior.code, reason: 'pilot_failed_requires_review' };
   const checkpoint: PilotCheckpoint = { ...prior };
+  if (routingRetry) {
+    checkpoint.failed = false;
+    delete checkpoint.code;
+    checkpoint.retryRevision = retryRevision;
+    // Consume the reset before making any external call. An interrupted retry requires a new review.
+    await db.query(`UPDATE factory_production_runs SET detail=$2,status='PROCESSING',updated_at=now() WHERE candidate_id=$1`, [key, JSON.stringify({ ...checkpoint, failed: true, code: 'pilot_operator_retry_interrupted' })]);
+  }
   // This fixed pilot was approved explicitly by the user; no general automated approver exists.
   const identity = { role: 'APPROVER', actor: 'system:factory-pilot:user-authorized', correlationId };
   const system = { role: 'SYSTEM', actor: identity.actor, correlationId };
