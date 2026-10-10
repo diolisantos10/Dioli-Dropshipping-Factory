@@ -8,6 +8,9 @@ import * as mediaRules from '../src/lib/media-factory.ts';
 import { checkpointStudioAssessment, recordMediaProductionResult, updateMediaProductionRequest } from '../src/lib/media-production-queue.ts';
 import { GatewayError } from '../src/lib/ai-gateway.ts';
 const require=createRequire(import.meta.url);
+const archiveModule={exports:{}};
+const archiveCode=ts.transpileModule(readFileSync(new URL('../src/lib/supplier-media-archive.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+new Script(`(function(require,module,exports){${archiveCode}\n})`).runInThisContext()(name=>name.startsWith('node:')?require(name):{},archiveModule,archiveModule.exports);
 
 test('single-product studio target leaves unrelated pending and stale paid requests untouched',async()=>{
  const requests=[{id:'other-pending',productId:'other',status:'PENDENTE',updatedAt:'2020-01-01T00:00:00Z'},
@@ -17,6 +20,7 @@ test('single-product studio target leaves unrelated pending and stale paid reque
   './server-state':{getDatabasePool:async()=>({connect:async()=>connection}),readState:async()=>({payload:{assets:[],productionRequests:requests}})},
   './command-runner':{runServerCommand:async()=>assert.fail('Unrelated queue must not be mutated')},
   './media-factory':mediaRules,'./product-factory':{},'./studio-gateway':{},'./ai-gateway':{},
+  './supplier-media-archive':archiveModule.exports,
  };
  const code=ts.transpileModule(readFileSync(new URL('../src/lib/studio-worker.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  const workerModule={exports:{}};
@@ -30,7 +34,7 @@ test('worker real limita concorrência, preserva originais e não gera produto a
  const old=process.env.DDF_PUBLIC_URL;process.env.DDF_PUBLIC_URL='https://ddf.example';t.after(()=>{if(old===undefined)delete process.env.DDF_PUBLIC_URL;else process.env.DDF_PUBLIC_URL=old;});
  let media=structuredClone(mediaRules.emptyMedia);
  const products=Array.from({length:4},(_,i)=>({id:`p${i}`,status:'EM_PRODUCAO',universalTitle:'Óculos',...(i===0?{archivedAt:'2026-10-09T00:00:00Z'}:{})}));
- for(const p of products)media=mediaRules.ingestSupplierOriginals(media,p.id,[`https://ae01.alicdn.com/${p.id}.png`],'Supplier','2026-10-09T00:00:00Z');
+ for(const p of products)media=mediaRules.ingestSupplierOriginals(media,p.id,[`https://ae-pic-a1.aliexpress-media.com/${p.id}.png`],'Supplier','2026-10-09T00:00:00Z');
  media.productionRequests=products.map((p,i)=>({id:`r${i}`,productId:p.id,status:'PENDENTE',updatedAt:`2026-10-09T00:00:0${i}Z`,sourceAssetIds:[`${p.id}-original-1`]}));
  let active=0,maxActive=0,generated=0,blobs=0;
  const connection={query:async sql=>({rows:[{acquired:sql.includes('try_advisory_lock')?true:undefined}]}),release:()=>{}};
@@ -38,6 +42,7 @@ test('worker real limita concorrência, preserva originais e não gera produto a
   './server-state':{getDatabasePool:async()=>({connect:async()=>connection,query:async(_sql,values)=>{blobs++;assert.match(values[1],/\.jpg$/);assert.equal(values[2],'image/jpeg');return{rows:[]};}}),readState:async domain=>({payload:domain==='media'?media:{products}})},
   './command-runner':{runServerCommand:async(type,input)=>{media=type==='media.checkpointStudioAssessment'?checkpointStudioAssessment(media,input.requestId,input,new Date().toISOString()):type==='media.recordStudioResult'?recordMediaProductionResult(media,input.requestId,input.asset,input.approved,`generated-${generated++}`,new Date().toISOString()):updateMediaProductionRequest(media,input.requestId,input.status,new Date().toISOString(),input.error);return{payload:media};}},
   './media-factory':mediaRules,'./product-factory':{emptyProductFactory:{products:[]}},
+  './supplier-media-archive':archiveModule.exports,
   './ai-gateway':{GatewayError,gatewayConfigurationStatus:()=>({configured:true})},
   './studio-gateway':{STUDIO_ANGLES:['frontal','lateral','posterior','tres-quartos'],assessStudioSourceBatch:async()=>({supportedIndices:[1],variantIdentity:'preto',evidence:'Frontal preto'}),generateReviewedStudioImage:async input=>{
     assert.notEqual(input.productId,'p0');active++;maxActive=Math.max(maxActive,active);await new Promise(resolve=>setTimeout(resolve,10));active--;
@@ -69,6 +74,7 @@ test('galerias grandes retomam checkpoints e nunca geram antes de ler todas as f
  './server-state':{getDatabasePool:async()=>({connect:async()=>connection,query:async()=>({rows:[]})}),readState:async domain=>({payload:domain==='media'?media:{products}})},
  './command-runner':{runServerCommand:async(type,input)=>{media=type==='media.checkpointStudioAssessment'?checkpointStudioAssessment(media,input.requestId,input,new Date().toISOString()):type==='media.recordStudioResult'?recordMediaProductionResult(media,input.requestId,input.asset,input.approved,`generated-${generated}`,new Date().toISOString()):updateMediaProductionRequest(media,input.requestId,input.status,new Date().toISOString(),input.error);return{payload:media};}},
  './media-factory':mediaRules,'./product-factory':{emptyProductFactory:{products:[]}},
+ './supplier-media-archive':archiveModule.exports,
  './ai-gateway':{GatewayError,gatewayConfigurationStatus:()=>({configured:true})},
  './studio-gateway':{STUDIO_ANGLES:['frontal','lateral','posterior','tres-quartos'],assessStudioSourceBatch:async input=>{assert.ok(input.references.length<=15);inspected+=input.references.length;const prior=seen.get(input.productId)??new Set();for(const url of input.references){assert.equal(prior.has(url),false,'Fotos já lidas não são cobradas novamente no mesmo ângulo');prior.add(url);}seen.set(input.productId,prior);return{supportedIndices:[1],variantIdentity:'preto',evidence:'Fonte fiel frontal'};},generateReviewedStudioImage:async input=>{assert.equal(seen.get(input.productId).size,31);assert.equal(input.sourceVerified,true);assert.equal(input.variantIdentity,'preto');generated++;return{image:{base64:Buffer.from(input.productId).toString('base64'),mimeType:'image/png',providerId:'openai',modelId:'image',generationId:input.productId},approved:true,evidence:'Produto fiel',reviewer:{providerId:'openai',modelId:'vision'}};}},
  };

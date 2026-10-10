@@ -5,6 +5,7 @@ import { emptyMedia, approvedStudioAssets, studioReadiness, type MediaProduction
 import { emptyProductFactory, type ProductFactoryState } from './product-factory';
 import { assessStudioSourceBatch, generateReviewedStudioImage, STUDIO_ANGLES } from './studio-gateway';
 import { GatewayError, gatewayConfigurationStatus } from './ai-gateway';
+import { archiveSourceAllowed } from './supplier-media-archive';
 
 const identity = { role: 'SYSTEM', actor: 'system:studio-production' };
 /** Bounded worker: up to three independent products per cron, one image per request, at most 45 source photos per run, explicit handoff required. */
@@ -36,7 +37,7 @@ export async function runStudioProduction(correlationId: string, targetProductId
       await runServerCommand('media.updateProductionRequest', { requestId: request.id, status: 'CONCLUIDO' }, { ...identity, correlationId });
       return { checked: 1, completed: 1 };
     }
-    const sources = request.sourceAssetIds.map(id => media.assets.find(item => item.id === id && item.productId === product.id && item.kind === 'ORIGINAL' && item.status === 'APROVADA')).filter(item => Boolean(item) && (() => { try { const url = new URL(item!.sourceUrl ?? item!.url); return url.protocol === 'https:' && /(^|\.)alicdn\.com$/.test(url.hostname) && !url.username && !url.password; } catch { return false; } })());
+    const sources = request.sourceAssetIds.map(id => media.assets.find(item => item.id === id && item.productId === product.id && item.kind === 'ORIGINAL' && item.status === 'APROVADA')).filter(item => Boolean(item) && archiveSourceAllowed(item!.sourceUrl ?? item!.url));
     const completedAngles = new Set(approvedStudioAssets(media, product.id).map(item => item.studioAngle));
     const angle = STUDIO_ANGLES.find(item => !completedAngles.has(item));
     await runServerCommand('media.updateProductionRequest', { requestId: request.id, status: 'PROCESSANDO' }, { ...identity, correlationId });
