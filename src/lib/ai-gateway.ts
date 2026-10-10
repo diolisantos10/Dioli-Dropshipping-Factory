@@ -139,17 +139,19 @@ export async function generateGatewayText(request: GatewayTextRequest): Promise<
     provenance: Object.fromEntries(Object.entries(provenance).filter(([key]) => !/credential|token|secret|key/i.test(key))) };
 }
 
-export type GatewayImageResult = { base64: string; mimeType: 'image/png'; providerId: string; modelId: string; generationId: string };
+export type GatewayImageResult = { base64: string; mimeType: 'image/png' | 'image/jpeg'; providerId: string; modelId: string; generationId: string };
 export async function generateGatewayImage(request: GatewayTextRequest): Promise<GatewayImageResult> {
   if (!request.referenceImages?.length) throw new GatewayError('gateway_invalid_request', 'Foto comercial exige referências originais.');
   const { body, result } = await executeGateway(request, true);
   const images = result.conteudo;
   const first = Array.isArray(images) && images.length === 1 ? images[0] : null;
   if (!first || typeof first.b64_json !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(first.b64_json) || first.b64_json.length > 13_333_336
-    || typeof body.provedorId !== 'string' || typeof body.modeloId !== 'string') throw new GatewayError('gateway_invalid_response', 'Gateway não devolveu uma imagem PNG válida no limite de 10 MB.');
+    || typeof body.provedorId !== 'string' || typeof body.modeloId !== 'string') throw new GatewayError('gateway_invalid_response', 'Gateway não devolveu uma imagem raster válida no limite de 10 MB.');
   const bytes = Buffer.from(first.b64_json, 'base64');
-  if (!bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) throw new GatewayError('gateway_invalid_response', 'Imagem devolvida não é PNG.');
+  const mimeType = bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) ? 'image/png'
+    : bytes.length >= 4 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255 && bytes.at(-2) === 255 && bytes.at(-1) === 217 ? 'image/jpeg' : null;
+  if (!mimeType) throw new GatewayError('gateway_invalid_response', 'Imagem devolvida não é PNG ou JPEG.');
   const provenance = result.proveniencia && typeof result.proveniencia === 'object' ? result.proveniencia as Record<string, unknown> : {};
-  return { base64: first.b64_json, mimeType: 'image/png', providerId: body.provedorId, modelId: body.modeloId,
+  return { base64: first.b64_json, mimeType, providerId: body.provedorId, modelId: body.modeloId,
     generationId: typeof provenance.request_id === 'string' ? provenance.request_id : 'central-gateway' };
 }

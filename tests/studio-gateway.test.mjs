@@ -38,6 +38,12 @@ test('transporte de imagem mantém referências e centralização, rejeita base6
   const request={roleAddress:'dioli.ddf.media-factory',system:'Preserve',prompt:'Estúdio',payloadRef:'p1',referenceImages:input.references};
   assert.equal((await generateGatewayImage(request)).generationId,'r1');
   assert.equal(sent.modalidade,'image');assert.equal(sent.n,1);assert.deepEqual(sent.imagensReferencia,input.references);assert.equal('model' in sent,false);
+  const jpeg=Buffer.from([255,216,255,224,0,0,255,217]).toString('base64');
+  t.mock.method(globalThis,'fetch',async()=>Response.json({ok:true,provedorId:'xai',modeloId:'central-model',resultado:{sucesso:true,conteudo:[{b64_json:jpeg}],proveniencia:{}}}));
+  assert.equal((await generateGatewayImage(request)).mimeType,'image/jpeg');
+  t.mock.method(globalThis,'fetch',async()=>Response.json({ok:true,provedorId:'xai',modeloId:'central-model',resultado:{sucesso:true,conteudo:[{b64_json:Buffer.from('untrusted-raster').toString('base64')}],proveniencia:{}}}));
+  await assert.rejects(generateGatewayImage(request),e=>e.code==='gateway_invalid_response');
+  t.mock.method(globalThis,'fetch',async(_url,init)=>{sent=JSON.parse(init.body);return Response.json({ok:true,provedorId:'openai',modeloId:'central-model',resultado:{sucesso:true,conteudo:[{b64_json:image.base64}],proveniencia:{}}});});
   assert.equal(validGatewayReference('data:image/svg+xml;base64,AAAA'),false);
   assert.equal(validGatewayReference('data:image/png;base64,@@@'),false);
   await generateGatewayText({...request,referenceImages:[`data:image/png;base64,${image.base64}`]}).catch(e=>assert.equal(e.code,'gateway_invalid_response'));

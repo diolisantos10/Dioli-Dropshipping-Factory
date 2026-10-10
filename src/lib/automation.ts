@@ -7,9 +7,10 @@ import { emptyOrders, purgeExpiredOrderData, type OrderState } from './orders';
 import { emptyPricing, latestCalculations, type PricingState } from './pricing';
 import { enrichRawCandidates, runFactoryProduction } from './factory-production';
 import { runBrandDiscovery } from './brand-discovery';
+import { runFactoryPilot } from './factory-pilot';
 
-export type AutomationTask = 'outbox' | 'credentials' | 'supplierOffers' | 'priceRecalculation' | 'channelOrders' | 'retention' | 'brandDiscovery' | 'factoryProduction' | 'rawEnrichment';
-export const automationTasks: AutomationTask[] = ['credentials', 'outbox', 'rawEnrichment', 'brandDiscovery', 'factoryProduction', 'supplierOffers', 'priceRecalculation', 'channelOrders', 'retention'];
+export type AutomationTask = 'outbox' | 'credentials' | 'supplierOffers' | 'priceRecalculation' | 'channelOrders' | 'retention' | 'brandDiscovery' | 'factoryProduction' | 'rawEnrichment' | 'factoryPilot';
+export const automationTasks: AutomationTask[] = ['credentials', 'outbox', 'rawEnrichment', 'brandDiscovery', 'factoryProduction', 'factoryPilot', 'supplierOffers', 'priceRecalculation', 'channelOrders', 'retention'];
 type TaskResult = { task: AutomationTask; status: 'SUCCEEDED' | 'FAILED' | 'BLOCKED'; durationMs: number; detail: Record<string, unknown>; error?: string };
 const SYSTEM = { role: 'SYSTEM' as const };
 const MAX_OFFERS_PER_RUN = 25;
@@ -124,6 +125,7 @@ async function applyRetention(actor: string, correlationId: string) {
 }
 
 const handlers: Record<AutomationTask, (actor: string, correlationId: string) => Promise<Record<string, unknown>>> = {
+  factoryPilot: runFactoryPilot,
   rawEnrichment: enrichRawCandidates,
   brandDiscovery: runBrandDiscovery,
   factoryProduction: runFactoryProduction,

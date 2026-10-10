@@ -19,7 +19,9 @@ try {
   const summary = (body.results ?? []).map((item) => {
     const vision = item.detail?.vision;
     const visionSummary = vision ? ` [vision: checked=${Number(vision.checked ?? 0)}, failed=${Number(vision.failed ?? 0)}, remaining=${Number(vision.remaining ?? 0)}${vision.reason ? `, ${vision.reason}` : ''}${(vision.results ?? []).filter(result => result.code).map(result => `, ${result.code}`).join('')}]` : '';
-    return `${item.task}=${item.status}${item.error ? ` (${item.error})` : ''}${visionSummary}`;
+    const pilot = item.task === 'factoryPilot' ? item.detail : undefined;
+    const pilotSummary = pilot ? ` [pilot: stage=${String(pilot.stage ?? 'SKIPPED').replace(/[^A-Z_]/g, '')}, source=${Number(pilot.sourceRead ?? 0)}/${Number(pilot.sourceCount ?? 0)}, approved=${Number(pilot.approvedPhotos ?? 0)}, gaps=${Number(pilot.gapCount ?? 0)}${typeof pilot.code === 'string' ? `, code=${pilot.code.replace(/[^a-z0-9_]/g, '')}` : ''}]` : '';
+    return `${item.task}=${item.status}${item.error ? ` (${item.error})` : ''}${visionSummary}${pilotSummary}`;
   }).join(' | ');
   console.log(`[ddf-cron] HTTP ${response.status} · ${body.status ?? body.error ?? 'sem corpo'} · ${Date.now() - started} ms${summary ? ` · ${summary}` : ''}`);
   // 409 = another run in progress: not a failure of this invocation.

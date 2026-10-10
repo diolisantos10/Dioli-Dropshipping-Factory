@@ -8,14 +8,14 @@ import { GatewayError, gatewayConfigurationStatus } from './ai-gateway';
 
 const identity = { role: 'SYSTEM', actor: 'system:studio-production' };
 /** Bounded worker: up to three independent products per cron, one image per request, at most 45 source photos per run, explicit handoff required. */
-export async function runStudioProduction(correlationId: string) {
+export async function runStudioProduction(correlationId: string, targetProductIds?: string[]) {
   const db = await getDatabasePool();
   const lock = await db.connect();
   const acquired = (await lock.query("SELECT pg_try_advisory_lock(hashtext('ddf:studio-production')) AS acquired")).rows[0]?.acquired;
   if (!acquired) { lock.release(); return { checked: 0, reason: 'studio_worker_busy' }; }
   try {
     const media = ((await readState('media'))?.payload ?? emptyMedia) as MediaState;
-    const requests = media.productionRequests ?? [];
+    const requests = (media.productionRequests ?? []).filter(item => !targetProductIds || targetProductIds.includes(item.productId));
     // Recovery avoids generating another paid image when a previous execution lost its checkpoint.
     for (const stale of requests.filter(item => item.status === 'PROCESSANDO' && Date.parse(item.updatedAt) < Date.now() - 12 * 60_000)) {
       await runServerCommand('media.updateProductionRequest', { requestId: stale.id, status: 'FALHOU', error: 'Execução interrompida; conferir o histórico antes de solicitar novamente.' }, { ...identity, correlationId });
@@ -61,7 +61,7 @@ export async function runStudioProduction(correlationId: string) {
         await runServerCommand('media.updateProductionRequest', { requestId: request.id, status: 'PENDENTE' }, { ...identity, correlationId });
         return { checked: 1, inspecting: 1, inspected: processed.size, remainingSources: sources.length - processed.size };
       }
-      const selectedSources = sources.filter(source => supported.has(source!.id)).slice(0, 15);
+      const selectedSources = sources.filter(source => supported.has(source!.id)).slice(0, 5);
       const references = selectedSources.map(source => source!.sourceUrl ?? source!.url);
       const result = await generateReviewedStudioImage({ productId: product.id, title: product.universalTitle, angle, references, correlationId,
         variantIdentity, sourceVerified: true });
@@ -69,13 +69,14 @@ export async function runStudioProduction(correlationId: string) {
       const checksum = createHash('sha256').update(content).digest('hex');
       if (media.assets.some(asset => asset.productId === product.id && asset.checksum === checksum && asset.kind === 'DERIVADA')) throw new GatewayError('studio_duplicate_image', 'Imagem repetida: não conta como novo ângulo.');
       const id = randomUUID();
-      await db.query('INSERT INTO media_blobs(id,filename,mime_type,bytes,checksum_sha256,content) VALUES($1,$2,$3,$4,$5,$6)', [id, `studio-${product.id}-${angle}.png`, result.image.mimeType, content.length, checksum, content]);
+      const jpeg = result.image.mimeType === 'image/jpeg';
+      await db.query('INSERT INTO media_blobs(id,filename,mime_type,bytes,checksum_sha256,content) VALUES($1,$2,$3,$4,$5,$6)', [id, `studio-${product.id}-${angle}.${jpeg ? 'jpg' : 'png'}`, result.image.mimeType, content.length, checksum, content]);
       const stored = await runServerCommand('media.recordStudioResult', { requestId: request.id, approved: result.approved,
         asset: { productId: product.id, url: `${publicOrigin}/api/media?id=${id}`, kind: 'DERIVADA', originalAssetId: selectedSources[0]!.id,
           sourceAssetIds: selectedSources.map(item => item!.id), purpose: `Estúdio ${angle}`, provenance: `Control Room ${result.image.providerId}/${result.image.modelId}`,
           transformationNotes: `Todas as ${sources.length} fotos originais inspecionadas; ${selectedSources.length} referências comprovadas da mesma variante usadas neste ângulo. Hiper-realismo 1:1 sem modelos, dimensões/formato/lentes/hastes/textura/cor/proporções preservados; revisão visual independente.`, studioAngle: angle,
           fidelityEvidence: `${result.evidence} Revisão: ${result.reviewer.providerId}/${result.reviewer.modelId}`, generationProvider: result.image.providerId, generationId: result.image.generationId,
-          mimeType: result.image.mimeType, checksum, bytes: content.length, changesProductAppearance: !result.approved, rightsStatus: 'DECLARADO', format: 'PNG', aspectRatio: '1:1' } }, { ...identity, correlationId });
+          mimeType: result.image.mimeType, checksum, bytes: content.length, changesProductAppearance: !result.approved, rightsStatus: 'DECLARADO', format: jpeg ? 'JPEG' : 'PNG', aspectRatio: '1:1' } }, { ...identity, correlationId });
       const next = stored.payload as MediaState;
       await runServerCommand('media.updateProductionRequest', { requestId: request.id, status: result.approved ? studioReadiness(next, product.id).ready ? 'CONCLUIDO' : 'PENDENTE' : 'BLOQUEADO',
         ...(result.approved ? {} : { error: 'Revisão visual recusou a fidelidade; imagem preservada no histórico para conferência.' }) }, { ...identity, correlationId });
