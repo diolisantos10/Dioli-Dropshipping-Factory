@@ -112,7 +112,7 @@ async function executeGateway(request: GatewayTextRequest, image = false) {
     // Upstream errors can contain provider details. Expose a stable code, never the raw response or token.
     const providerFailures: Record<string, string> = { schema_invalido: 'invalid_request', indisponivel: 'unavailable', timeout: 'timeout', politica_provedor: 'access_denied', orcamento_provedor_excedido: 'budget_exceeded' };
     const providerFailure = typeof result.erroNormalizado === 'string' ? providerFailures[result.erroNormalizado] : undefined;
-    const upstreamStatus = typeof result.motivo === 'string' ? result.motivo.match(/^OpenAI respondeu HTTP (\d{3})\.$/)?.[1] : undefined;
+    const upstreamStatus = typeof result.motivo === 'string' ? result.motivo.match(/^(?:OpenAI|xAI) respondeu HTTP (\d{3})\.$/)?.[1] : undefined;
     const providerCodes = ['insufficient_quota', 'credit_balance_exhausted', 'organization_spend_limit_exceeded', 'project_spend_limit_exceeded', 'organization_usage_limit_exceeded', 'rate_limit_exceeded', 'slow_down', 'invalid_api_key', 'model_not_found', 'model_access_denied', 'invalid_image_url', 'invalid_image', 'unsupported_parameter', 'billing_hard_limit_reached', 'organization_deactivated', 'content_policy_violation'];
     const providerCode = typeof result.codigoDoProvedor === 'string' && providerCodes.includes(result.codigoDoProvedor) ? result.codigoDoProvedor : undefined;
     const code = response.status === 401 ? 'gateway_pairing_required' : response.status === 409 ? 'gateway_policy_blocked'
