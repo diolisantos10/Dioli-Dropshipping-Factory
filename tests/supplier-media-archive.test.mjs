@@ -23,6 +23,7 @@ test('database failures expose only allowlisted schema and permission classifica
   const { archiveFailureCode } = load();
   assert.equal(archiveFailureCode({ code: '42P01', message: 'PRIVATE TABLE NAME' }, 'persistence'), 'persistence_schema_missing');
   assert.equal(archiveFailureCode({ code: '42501', message: 'PRIVATE CREDENTIAL' }, 'persistence'), 'persistence_permission');
+  assert.equal(archiveFailureCode({ code: '22P02', message: 'PRIVATE ASSET ID' }, 'persistence'), 'persistence_invalid_identifier');
   assert.equal(archiveFailureCode({ code: 'arbitrary-secret' }, 'persistence'), 'persistence');
 });
 test('archive reports bounded failure classes without source URLs, IDs, content or raw exceptions', async t => {

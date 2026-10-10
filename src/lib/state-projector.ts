@@ -15,6 +15,9 @@ const stableUuid = (value: string) => {
   const hex = createHash('sha256').update(value).digest('hex').slice(0, 32);
   return `${hex.slice(0,8)}-${hex.slice(8,12)}-4${hex.slice(13,16)}-a${hex.slice(17,20)}-${hex.slice(20)}`;
 };
+// Supplier-original state IDs predate the relational UUID column. Normalize only the
+// projection key; state IDs and original/source references keep their existing identity.
+const mediaProjectionId = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) ? value : stableUuid(`media:${value}`);
 
 export async function projectState(client: PoolClient, namespace: StateNamespace, payload: unknown, actor: string) {
   if (namespace === 'intake') {
@@ -47,7 +50,7 @@ export async function projectState(client: PoolClient, namespace: StateNamespace
     (id,product_id,kind,status,storage_key,checksum,mime_type,bytes,purpose,provenance)
     VALUES($1,(SELECT id FROM master_products WHERE id=$2),$3,$4,$5,$6,$7,$8,$9,$10)
     ON CONFLICT(id) DO UPDATE SET status=EXCLUDED.status,purpose=EXCLUDED.purpose,provenance=EXCLUDED.provenance`,[
-    text(row,'id'),text(row,'productId'),text(row,'kind','ORIGINAL'),text(row,'status','EM_REVISAO'),text(row,'url'),text(row,'checksum'),text(row,'mimeType','application/octet-stream'),number(row,'bytes'),text(row,'purpose'),text(row,'provenance')]);
+    mediaProjectionId(text(row,'id')),text(row,'productId'),text(row,'kind','ORIGINAL'),text(row,'status','EM_REVISAO'),text(row,'url'),text(row,'checksum'),text(row,'mimeType','application/octet-stream'),number(row,'bytes'),text(row,'purpose'),text(row,'provenance')]);
   if (namespace === 'pricing') for (const row of records(payload, 'calculations')) await client.query(`INSERT INTO price_calculations
     (id,product_id,context,version,currency,components,suggested_price,minimum_safe_price,status,reason,calculated_at)
     VALUES($1,(SELECT id FROM master_products WHERE id=$2),$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(id) DO NOTHING`,[

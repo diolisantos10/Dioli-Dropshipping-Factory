@@ -14,6 +14,7 @@ export function archiveFailureCode(error: unknown, phase: 'download' | 'persiste
   const databaseCode = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
   if (phase === 'persistence' && databaseCode === '42P01') return 'persistence_schema_missing';
   if (phase === 'persistence' && databaseCode === '42501') return 'persistence_permission';
+  if (phase === 'persistence' && databaseCode === '22P02') return 'persistence_invalid_identifier';
   return error instanceof Error && ['TimeoutError', 'AbortError'].includes(error.name) ? 'timeout' : phase === 'persistence' ? 'persistence' : 'download_failed';
 }
 export function archiveSourceAllowed(value: string) {
