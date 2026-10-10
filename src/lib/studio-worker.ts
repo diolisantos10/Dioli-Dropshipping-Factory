@@ -3,11 +3,11 @@ import { getDatabasePool, readState } from './server-state';
 import { runServerCommand } from './command-runner';
 import { emptyMedia, approvedStudioAssets, studioReadiness, type MediaProductionRequest, type MediaState } from './media-factory';
 import { emptyProductFactory, type ProductFactoryState } from './product-factory';
-import { generateReviewedStudioImage, STUDIO_ANGLES } from './studio-gateway';
+import { assessStudioSourceBatch, generateReviewedStudioImage, STUDIO_ANGLES } from './studio-gateway';
 import { GatewayError, gatewayConfigurationStatus } from './ai-gateway';
 
 const identity = { role: 'SYSTEM', actor: 'system:studio-production' };
-/** Bounded worker: up to three independent products per cron, one image per request, explicit handoff required. */
+/** Bounded worker: up to three independent products per cron, one image per request, at most 45 source photos per run, explicit handoff required. */
 export async function runStudioProduction(correlationId: string) {
   const db = await getDatabasePool();
   const lock = await db.connect();
@@ -25,6 +25,7 @@ export async function runStudioProduction(correlationId: string) {
     if (!gatewayConfigurationStatus().configured || !process.env.DDF_PUBLIC_URL) return { checked: 0, blocked: 1, reason: 'studio_configuration_missing' };
     const publicOrigin = new URL(process.env.DDF_PUBLIC_URL).origin;
     const products = ((await readState('products'))?.payload ?? emptyProductFactory) as ProductFactoryState;
+    const sourceBudgetPerRequest = Math.floor(45 / pending.length);
     async function processRequest(request: MediaProductionRequest) {
     const product = products.products.find(item => item.id === request.productId && item.status === 'EM_PRODUCAO' && !item.archivedAt);
     if (!product) {
@@ -35,23 +36,44 @@ export async function runStudioProduction(correlationId: string) {
       await runServerCommand('media.updateProductionRequest', { requestId: request.id, status: 'CONCLUIDO' }, { ...identity, correlationId });
       return { checked: 1, completed: 1 };
     }
-    const sources = request.sourceAssetIds.map(id => media.assets.find(item => item.id === id && item.productId === product.id && item.kind === 'ORIGINAL' && item.status === 'APROVADA')).filter(item => Boolean(item) && (() => { try { const url = new URL(item!.sourceUrl ?? item!.url); return url.protocol === 'https:' && /(^|\.)alicdn\.com$/.test(url.hostname) && !url.username && !url.password; } catch { return false; } })()).slice(0, 15);
-    const references = sources.map(item => item!.sourceUrl ?? item!.url).filter(url => { try { return new URL(url).protocol === 'https:' && /(^|\.)alicdn\.com$/.test(new URL(url).hostname); } catch { return false; } }).slice(0, 15);
+    const sources = request.sourceAssetIds.map(id => media.assets.find(item => item.id === id && item.productId === product.id && item.kind === 'ORIGINAL' && item.status === 'APROVADA')).filter(item => Boolean(item) && (() => { try { const url = new URL(item!.sourceUrl ?? item!.url); return url.protocol === 'https:' && /(^|\.)alicdn\.com$/.test(url.hostname) && !url.username && !url.password; } catch { return false; } })());
     const completedAngles = new Set(approvedStudioAssets(media, product.id).map(item => item.studioAngle));
     const angle = STUDIO_ANGLES.find(item => !completedAngles.has(item));
     await runServerCommand('media.updateProductionRequest', { requestId: request.id, status: 'PROCESSANDO' }, { ...identity, correlationId });
     try {
-      if (!references.length || !angle) throw new GatewayError('studio_missing_references', 'Não há originais públicos ou ângulo pendente válido.');
-      const result = await generateReviewedStudioImage({ productId: product.id, title: product.universalTitle, angle, references, correlationId });
+      if (!sources.length || !angle || sources.length !== request.sourceAssetIds.length) throw new GatewayError('studio_missing_references', 'Todos os originais precisam estar disponíveis para inspeção; nenhuma foto foi ignorada.');
+      const existing = request.sourceAssessment;
+      const processed = new Set(existing?.angle === angle ? existing.processedSourceAssetIds : []);
+      const supported = new Set(existing?.angle === angle ? existing.supportedSourceAssetIds : []);
+      let variantIdentity = existing?.variantIdentity ?? '';
+      const pendingSources = sources.filter(source => !processed.has(source!.id));
+      for (let offset = 0; offset < Math.min(sourceBudgetPerRequest, pendingSources.length); offset += 15) {
+        const batch = pendingSources.slice(offset, Math.min(offset + 15, sourceBudgetPerRequest));
+        const assessment = await assessStudioSourceBatch({ productId: product.id, title: product.universalTitle, angle,
+          references: batch.map(source => source!.sourceUrl ?? source!.url), variantIdentity, correlationId });
+        variantIdentity = assessment.variantIdentity;
+        batch.forEach(source => processed.add(source!.id));
+        assessment.supportedIndices.forEach(index => supported.add(batch[index - 1]!.id));
+        await runServerCommand('media.checkpointStudioAssessment', { requestId: request.id, angle, variantIdentity,
+          processedSourceAssetIds: [...processed], supportedSourceAssetIds: [...supported], evidence: [assessment.evidence] }, { ...identity, correlationId });
+      }
+      if (sources.some(source => !processed.has(source!.id))) {
+        await runServerCommand('media.updateProductionRequest', { requestId: request.id, status: 'PENDENTE' }, { ...identity, correlationId });
+        return { checked: 1, inspecting: 1, inspected: processed.size, remainingSources: sources.length - processed.size };
+      }
+      const selectedSources = sources.filter(source => supported.has(source!.id)).slice(0, 15);
+      const references = selectedSources.map(source => source!.sourceUrl ?? source!.url);
+      const result = await generateReviewedStudioImage({ productId: product.id, title: product.universalTitle, angle, references, correlationId,
+        variantIdentity, sourceVerified: true });
       const content = Buffer.from(result.image.base64, 'base64');
       const checksum = createHash('sha256').update(content).digest('hex');
       if (media.assets.some(asset => asset.productId === product.id && asset.checksum === checksum && asset.kind === 'DERIVADA')) throw new GatewayError('studio_duplicate_image', 'Imagem repetida: não conta como novo ângulo.');
       const id = randomUUID();
       await db.query('INSERT INTO media_blobs(id,filename,mime_type,bytes,checksum_sha256,content) VALUES($1,$2,$3,$4,$5,$6)', [id, `studio-${product.id}-${angle}.png`, result.image.mimeType, content.length, checksum, content]);
       const stored = await runServerCommand('media.recordStudioResult', { requestId: request.id, approved: result.approved,
-        asset: { productId: product.id, url: `${publicOrigin}/api/media?id=${id}`, kind: 'DERIVADA', originalAssetId: sources[0]!.id,
-          sourceAssetIds: sources.slice(0, references.length).map(item => item!.id), purpose: `Estúdio ${angle}`, provenance: `Control Room ${result.image.providerId}/${result.image.modelId}`,
-          transformationNotes: 'Cenário e iluminação de estúdio; verificação visual independente contra referências do fornecedor.', studioAngle: angle,
+        asset: { productId: product.id, url: `${publicOrigin}/api/media?id=${id}`, kind: 'DERIVADA', originalAssetId: selectedSources[0]!.id,
+          sourceAssetIds: selectedSources.map(item => item!.id), purpose: `Estúdio ${angle}`, provenance: `Control Room ${result.image.providerId}/${result.image.modelId}`,
+          transformationNotes: `Todas as ${sources.length} fotos originais inspecionadas; ${selectedSources.length} referências comprovadas da mesma variante usadas neste ângulo. Hiper-realismo 1:1 sem modelos, dimensões/formato/lentes/hastes/textura/cor/proporções preservados; revisão visual independente.`, studioAngle: angle,
           fidelityEvidence: `${result.evidence} Revisão: ${result.reviewer.providerId}/${result.reviewer.modelId}`, generationProvider: result.image.providerId, generationId: result.image.generationId,
           mimeType: result.image.mimeType, checksum, bytes: content.length, changesProductAppearance: !result.approved, rightsStatus: 'DECLARADO', format: 'PNG', aspectRatio: '1:1' } }, { ...identity, correlationId });
       const next = stored.payload as MediaState;

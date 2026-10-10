@@ -6,7 +6,7 @@ import { addCandidate, bulkTransitionCandidates, refreshCandidateSupplier, empty
 import { archiveProducts, emptyProductFactory, markProductReady, refreshProductSupplier, restoreProductVersion, setProductAvailability, startProduct, updateProduct, updateProductFiscal, type ProductFactoryState, type UniversalProductSpec } from './product-factory.ts';
 import type { Availability, ProductFiscal, VariantLogistics } from './product-fiscal.ts';
 import { addMedia, completeTransformation, emptyMedia, enqueueTransformation, ingestSupplierOriginals, studioReadiness, reviewMedia, updateTransformationJob, type MediaAsset, type MediaState, type TransformationJob } from './media-factory.ts';
-import { bulkSendToMedia, recordMediaProductionResult, updateMediaProductionRequest } from './media-production-queue.ts';
+import { bulkSendToMedia, checkpointStudioAssessment, recordMediaProductionResult, updateMediaProductionRequest } from './media-production-queue.ts';
 import { requestProductCompletion, updateCompletionRequest } from './product-completion-queue.ts';
 import { approvePrice, calculatePrice, emptyPricing, recalculateSupplierCost, releaseQuarantine, type PricingInput, type PricingState } from './pricing.ts';
 import { advanceOrder, emptyOrders, flagOrderException, purgeExpiredOrderData, receiveOrder, resolveOrderException, type ExceptionCategory, type ExceptionResolution, type OrderState, type OrderStatus } from './orders.ts';
@@ -227,6 +227,11 @@ export const COMMANDS: Record<string, Handler> = {
     bulkSendToMedia(s.media, s.products, s.intake, ids(i, 'productIds'), c.newId, c.at, c.actor) },
   'media.updateProductionRequest': { writes: 'media', reads: [], roles: always(['SYSTEM']), run: (s, i, c) =>
     updateMediaProductionRequest(s.media, str(i, 'requestId', 80), oneOf(i, 'status', ['PENDENTE', 'PROCESSANDO', 'CONCLUIDO', 'BLOQUEADO', 'FALHOU'] as const), c.at, str(i, 'error', 1000, false)) },
+  'media.checkpointStudioAssessment': { writes: 'media', reads: [], roles: always(['SYSTEM']), run: (s, i, c) =>
+    checkpointStudioAssessment(s.media, str(i, 'requestId', 80), {
+      angle: str(i, 'angle', 100), variantIdentity: str(i, 'variantIdentity', 500, false), processedSourceAssetIds: strings(i, 'processedSourceAssetIds', 2000),
+      supportedSourceAssetIds: strings(i, 'supportedSourceAssetIds', 2000), evidence: strings(i, 'evidence', 200),
+    }, c.at) },
   'media.recordStudioResult': { writes: 'media', reads: ['products'], roles: always(['SYSTEM']), run: (s, i, c) => {
     if (typeof i.approved !== 'boolean') throw new CommandError('Informe o resultado da revisão visual.');
     const raw = obj(i, 'asset');

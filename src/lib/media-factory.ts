@@ -25,6 +25,7 @@ export type MediaProductionRequest = {
   id: string; productId: string; status: 'PENDENTE' | 'PROCESSANDO' | 'CONCLUIDO' | 'BLOQUEADO' | 'FALHOU';
   requestedAt: string; requestedBy: string; updatedAt: string; sourceAssetIds: string[];
   requiredCount: 4; error?: string;
+  sourceAssessment?: { angle: string; variantIdentity: string; processedSourceAssetIds: string[]; supportedSourceAssetIds: string[]; evidence: string[] };
 };
 export type MediaState = { version: 1 | 2; assets: MediaAsset[]; jobs?: TransformationJob[]; productionRequests?: MediaProductionRequest[] };
 export const MEDIA_STORAGE_KEY = 'ddf.media.demo.v1';

@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { Script } from 'node:vm';
 import ts from 'typescript';
 import * as mediaRules from '../src/lib/media-factory.ts';
-import { recordMediaProductionResult, updateMediaProductionRequest } from '../src/lib/media-production-queue.ts';
+import { checkpointStudioAssessment, recordMediaProductionResult, updateMediaProductionRequest } from '../src/lib/media-production-queue.ts';
 import { GatewayError } from '../src/lib/ai-gateway.ts';
 const require=createRequire(import.meta.url);
 
@@ -19,10 +19,10 @@ test('worker real limita concorrência, preserva originais e não gera produto a
  const connection={query:async sql=>({rows:[{acquired:sql.includes('try_advisory_lock')?true:undefined}]}),release:()=>{}};
  const deps={
   './server-state':{getDatabasePool:async()=>({connect:async()=>connection,query:async()=>{blobs++;return{rows:[]};}}),readState:async domain=>({payload:domain==='media'?media:{products}})},
-  './command-runner':{runServerCommand:async(type,input)=>{media=type==='media.recordStudioResult'?recordMediaProductionResult(media,input.requestId,input.asset,input.approved,`generated-${generated++}`,new Date().toISOString()):updateMediaProductionRequest(media,input.requestId,input.status,new Date().toISOString(),input.error);return{payload:media};}},
+  './command-runner':{runServerCommand:async(type,input)=>{media=type==='media.checkpointStudioAssessment'?checkpointStudioAssessment(media,input.requestId,input,new Date().toISOString()):type==='media.recordStudioResult'?recordMediaProductionResult(media,input.requestId,input.asset,input.approved,`generated-${generated++}`,new Date().toISOString()):updateMediaProductionRequest(media,input.requestId,input.status,new Date().toISOString(),input.error);return{payload:media};}},
   './media-factory':mediaRules,'./product-factory':{emptyProductFactory:{products:[]}},
   './ai-gateway':{GatewayError,gatewayConfigurationStatus:()=>({configured:true})},
-  './studio-gateway':{STUDIO_ANGLES:['frontal','lateral','posterior','tres-quartos'],generateReviewedStudioImage:async input=>{
+  './studio-gateway':{STUDIO_ANGLES:['frontal','lateral','posterior','tres-quartos'],assessStudioSourceBatch:async()=>({supportedIndices:[1],variantIdentity:'preto',evidence:'Frontal preto'}),generateReviewedStudioImage:async input=>{
     assert.notEqual(input.productId,'p0');active++;maxActive=Math.max(maxActive,active);await new Promise(resolve=>setTimeout(resolve,10));active--;
     return{image:{base64:Buffer.from('png-bytes').toString('base64'),mimeType:'image/png',providerId:'openai',modelId:'image',generationId:input.productId},approved:true,evidence:'mesmo produto',reviewer:{providerId:'openai',modelId:'vision'}};
   }},
@@ -36,4 +36,28 @@ test('worker real limita concorrência, preserva originais e não gera produto a
  assert.equal(media.productionRequests.find(r=>r.productId==='p0').status,'BLOQUEADO');
  assert.equal(media.productionRequests.find(r=>r.productId==='p3').status,'PENDENTE');
  assert.equal(mediaRules.studioReadiness(media,'p1').ready,false);
+});
+
+test('galerias grandes retomam checkpoints e nunca geram antes de ler todas as fotos, no máximo 45 por ciclo',async t=>{
+ const old=process.env.DDF_PUBLIC_URL;process.env.DDF_PUBLIC_URL='https://ddf.example';t.after(()=>{if(old===undefined)delete process.env.DDF_PUBLIC_URL;else process.env.DDF_PUBLIC_URL=old;});
+ let media=structuredClone(mediaRules.emptyMedia);
+ const products=Array.from({length:3},(_,i)=>({id:`large${i}`,status:'EM_PRODUCAO',universalTitle:'Óculos preto'}));
+ for(const p of products)media=mediaRules.ingestSupplierOriginals(media,p.id,Array.from({length:31},(_,i)=>`https://ae01.alicdn.com/${p.id}-${i}.png`),'Supplier','2026-10-09T00:00:00Z');
+ media.productionRequests=products.map((p,i)=>({id:`large-r${i}`,productId:p.id,status:'PENDENTE',updatedAt:`2026-10-09T00:00:0${i}Z`,sourceAssetIds:media.assets.filter(a=>a.productId===p.id).map(a=>a.id)}));
+ let inspected=0,generated=0;
+ const seen=new Map();
+ const connection={query:async()=>({rows:[{acquired:true}]}),release:()=>{}};
+ const deps={
+ './server-state':{getDatabasePool:async()=>({connect:async()=>connection,query:async()=>({rows:[]})}),readState:async domain=>({payload:domain==='media'?media:{products}})},
+ './command-runner':{runServerCommand:async(type,input)=>{media=type==='media.checkpointStudioAssessment'?checkpointStudioAssessment(media,input.requestId,input,new Date().toISOString()):type==='media.recordStudioResult'?recordMediaProductionResult(media,input.requestId,input.asset,input.approved,`generated-${generated}`,new Date().toISOString()):updateMediaProductionRequest(media,input.requestId,input.status,new Date().toISOString(),input.error);return{payload:media};}},
+ './media-factory':mediaRules,'./product-factory':{emptyProductFactory:{products:[]}},
+ './ai-gateway':{GatewayError,gatewayConfigurationStatus:()=>({configured:true})},
+ './studio-gateway':{STUDIO_ANGLES:['frontal','lateral','posterior','tres-quartos'],assessStudioSourceBatch:async input=>{assert.ok(input.references.length<=15);inspected+=input.references.length;const prior=seen.get(input.productId)??new Set();for(const url of input.references){assert.equal(prior.has(url),false,'Fotos já lidas não são cobradas novamente no mesmo ângulo');prior.add(url);}seen.set(input.productId,prior);return{supportedIndices:[1],variantIdentity:'preto',evidence:'Fonte fiel frontal'};},generateReviewedStudioImage:async input=>{assert.equal(seen.get(input.productId).size,31);assert.equal(input.sourceVerified,true);assert.equal(input.variantIdentity,'preto');generated++;return{image:{base64:Buffer.from(input.productId).toString('base64'),mimeType:'image/png',providerId:'openai',modelId:'image',generationId:input.productId},approved:true,evidence:'Produto fiel',reviewer:{providerId:'openai',modelId:'vision'}};}},
+ };
+ const code=ts.transpileModule(readFileSync(new URL('../src/lib/studio-worker.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ const workerModule={exports:{}};
+ new Script(`(function(require,module,exports){${code}\n})`).runInThisContext()(name=>name.startsWith('node:')?require(name):deps[name],workerModule,workerModule.exports);
+ for(let run=0;run<3;run++){inspected=0;const result=await workerModule.exports.runStudioProduction('large-gallery');assert.ok(inspected<=45);assert.equal(result.failed,0);if(run<2){assert.equal(generated,0);assert.ok(media.productionRequests.every(r=>r.status==='PENDENTE'));}}
+ assert.equal(generated,3);assert.ok(media.productionRequests.every(r=>r.sourceAssessment.processedSourceAssetIds.length===31));
+ assert.equal(media.assets.filter(a=>a.kind==='ORIGINAL').length,93);
 });

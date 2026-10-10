@@ -110,7 +110,11 @@ async function executeGateway(request: GatewayTextRequest, image = false) {
   const result = body.resultado && typeof body.resultado === 'object' ? body.resultado as Record<string, unknown> : {};
   if (!response.ok || body.ok !== true || result.sucesso !== true) {
     // Upstream errors can contain provider details. Expose a stable code, never the raw response or token.
+    const providerFailures: Record<string, string> = { schema_invalido: 'invalid_request', indisponivel: 'unavailable', timeout: 'timeout', politica_provedor: 'access_denied', orcamento_provedor_excedido: 'budget_exceeded' };
+    const providerFailure = typeof result.erroNormalizado === 'string' ? providerFailures[result.erroNormalizado] : undefined;
+    const upstreamStatus = typeof result.motivo === 'string' ? result.motivo.match(/^OpenAI respondeu HTTP (\d{3})\.$/)?.[1] : undefined;
     const code = response.status === 401 ? 'gateway_pairing_required' : response.status === 409 ? 'gateway_policy_blocked'
+      : response.status === 502 && providerFailure ? `gateway_provider_${providerFailure}${upstreamStatus ? `_http_${upstreamStatus}` : ''}`
       : response.status === 422 ? 'gateway_contract_rejected' : 'gateway_execution_failed';
     throw new GatewayError(code, response.status === 401 ? 'Pareamento da DDF não autorizado na Control Room.'
       : response.status === 409 ? 'Execução bloqueada por perfil, política ou orçamento da Control Room.'

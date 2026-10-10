@@ -15,11 +15,15 @@ export function bulkSendToMedia(state: MediaState, products: ProductFactoryState
     const images = [...(candidate.supplier?.images ?? []), candidate.supplier?.imageUrl ?? '', ...(product.spec?.sourceImages ?? [])].filter(Boolean);
     next = ingestSupplierOriginals(next, productId, images, candidate.url, at);
     const existing = (next.productionRequests ?? []).find(item => item.productId === productId);
-    if (existing && ['PENDENTE', 'PROCESSANDO'].includes(existing.status)) continue;
     const sourceAssetIds = next.assets.filter(asset => asset.productId === productId && asset.kind === 'ORIGINAL' && asset.status === 'APROVADA').map(asset => asset.id);
+    if (existing && ['PENDENTE', 'PROCESSANDO'].includes(existing.status)) {
+      if (sourceAssetIds.some(id => !existing.sourceAssetIds.includes(id))) next = { ...next, productionRequests: next.productionRequests?.map(item => item.id === existing.id ? { ...item, sourceAssetIds, updatedAt: at } : item) };
+      continue;
+    }
     const request: MediaProductionRequest = {
       id: existing?.id ?? newId(), productId, status: sourceAssetIds.length ? 'PENDENTE' : 'BLOQUEADO',
       requestedAt: at, requestedBy: actor, updatedAt: at, sourceAssetIds, requiredCount: 4,
+      sourceAssessment: existing?.sourceAssessment,
       error: sourceAssetIds.length ? undefined : 'Produto sem imagens originais do fornecedor; aguardando importação.',
     };
     next = { ...next, productionRequests: [request, ...(next.productionRequests ?? []).filter(item => item.productId !== productId)] };
@@ -47,4 +51,17 @@ export function recordMediaProductionResult(state: MediaState, requestId: string
   if (state.assets.some(original => original.kind === 'ORIGINAL' && (original.url === asset.url || original.sourceUrl === asset.url))) throw new Error('Imagem original não pode ser apresentada como foto de estúdio gerada.');
   const next = addMedia(state, { ...asset, studio: true, fidelityVerified: approved }, id, at);
   return reviewMedia(next, id, approved ? 'APROVADA' : 'REJEITADA');
+}
+
+export function checkpointStudioAssessment(state: MediaState, requestId: string, assessment: NonNullable<MediaProductionRequest['sourceAssessment']>, at: string): MediaState {
+  const request = state.productionRequests?.find(item => item.id === requestId);
+  if (!request || request.status !== 'PROCESSANDO') throw new Error('Solicitação de mídia não está em processamento.');
+  const processed = [...new Set(assessment.processedSourceAssetIds)];
+  const supported = [...new Set(assessment.supportedSourceAssetIds)];
+  if (!assessment.angle.trim() || processed.some(id => !request.sourceAssetIds.includes(id)) || supported.some(id => !processed.includes(id))) throw new Error('Análise contém referências inválidas para esta solicitação.');
+  const previous = request.sourceAssessment?.angle === assessment.angle ? request.sourceAssessment : undefined;
+  const priorIdentity = request.sourceAssessment?.variantIdentity ?? '';
+  if (priorIdentity && assessment.variantIdentity && priorIdentity !== assessment.variantIdentity) throw new Error('Não é possível misturar variantes na mesma análise de referências.');
+  const sourceAssessment = { angle: assessment.angle, variantIdentity: assessment.variantIdentity || priorIdentity, processedSourceAssetIds: [...new Set([...(previous?.processedSourceAssetIds ?? []), ...processed])], supportedSourceAssetIds: [...new Set([...(previous?.supportedSourceAssetIds ?? []), ...supported])], evidence: [...new Set([...(previous?.evidence ?? []), ...assessment.evidence])].slice(-200) };
+  return { ...state, productionRequests: state.productionRequests?.map(item => item.id === requestId ? { ...item, sourceAssessment, updatedAt: at } : item) };
 }

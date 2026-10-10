@@ -57,7 +57,8 @@ export function useServerStates<N extends ClientNamespace>(namespaces: readonly 
     const onVisible = () => { if (document.visibilityState === 'visible') load(); };
     window.addEventListener(STATE_EVENT, onUpdate);
     document.addEventListener('visibilitychange', onVisible);
-    return () => { alive = false; sequence.current += 1; window.removeEventListener(STATE_EVENT, onUpdate); document.removeEventListener('visibilitychange', onVisible); };
+    const poll = window.setInterval(onVisible, 30_000);
+    return () => { window.clearInterval(poll); alive = false; sequence.current += 1; window.removeEventListener(STATE_EVENT, onUpdate); document.removeEventListener('visibilitychange', onVisible); };
   }, [key, load]);
 
   return { states, status, fromCache, error, reload: load };

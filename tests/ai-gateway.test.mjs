@@ -39,6 +39,14 @@ test('rejeição por pareamento não vaza resposta nem segredo e não vira suces
   await assert.rejects(generateGatewayText(request),e=>e.code==='gateway_pairing_required'&&!e.message.includes(env.CONTROL_ROOM_SERVICE_TOKEN));
 });
 
+test('falha do provedor conserva classificação e HTTP controlados, sem ecoar resposta privada', async t => {
+  configure(t);
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ ok: false, resultado: { sucesso: false, erroNormalizado: 'orcamento_provedor_excedido', motivo: 'OpenAI respondeu HTTP 429.', private: env.CONTROL_ROOM_SERVICE_TOKEN } }, { status: 502 }));
+  await assert.rejects(generateGatewayText(request), error => error.code === 'gateway_provider_budget_exceeded_http_429' && !error.message.includes(env.CONTROL_ROOM_SERVICE_TOKEN));
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ ok: false, resultado: { sucesso: false, erroNormalizado: env.CONTROL_ROOM_SERVICE_TOKEN, motivo: env.CONTROL_ROOM_SERVICE_TOKEN } }, { status: 502 }));
+  await assert.rejects(generateGatewayText(request), error => error.code === 'gateway_execution_failed' && !error.message.includes(env.CONTROL_ROOM_SERVICE_TOKEN));
+});
+
 test('sem configuração falha antes da rede; capacidades descrevem o contrato central implementado',()=>{
   assert.equal(gatewayConfigurationStatus().configured,false);
   assert.equal(GATEWAY_CAPABILITIES.referenceImages,true);

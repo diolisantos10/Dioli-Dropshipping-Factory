@@ -57,6 +57,26 @@ test('envio recusa seleção sem elegíveis, lote enorme e usuário sem permiss�
   assert.throws(() => command(states, 'media.bulkSendToMedia', { productIds: Array(201).fill('p1') }), /Lista inválida/);
   assert.throws(() => command(states, 'media.bulkSendToMedia', { productIds: ['p1'] }, 'VIEWER'), /papel/);
 });
+test('análise retomável percorre a galeria inteira e não mistura identidade de variantes', () => {
+  const states = fixture();
+  states.intake.candidates[0].supplier.images = Array.from({ length: 31 }, (_, index) => `https://img.test/gallery-${index}.jpg`);
+  states.media = command(states, 'media.bulkSendToMedia', { productIds: ['p1'] });
+  const request = states.media.productionRequests[0];
+  assert.equal(request.sourceAssetIds.length, 31);
+  states.media = command(states, 'media.updateProductionRequest', { requestId: request.id, status: 'PROCESSANDO' }, 'SYSTEM');
+  const base = { requestId: request.id, angle: 'frente', variantIdentity: 'SKU preto', evidence: ['Armação preta confirmada'] };
+  states.media = command(states, 'media.checkpointStudioAssessment', { ...base, processedSourceAssetIds: request.sourceAssetIds.slice(0, 15), supportedSourceAssetIds: [request.sourceAssetIds[0]] }, 'SYSTEM');
+  states.media = command(states, 'media.checkpointStudioAssessment', { ...base, processedSourceAssetIds: request.sourceAssetIds.slice(15), supportedSourceAssetIds: [request.sourceAssetIds[30]] }, 'SYSTEM');
+  const assessment = states.media.productionRequests[0].sourceAssessment;
+  assert.equal(assessment.processedSourceAssetIds.length, 31);
+  assert.deepEqual(assessment.supportedSourceAssetIds, [request.sourceAssetIds[0], request.sourceAssetIds[30]]);
+  assert.throws(() => command(states, 'media.checkpointStudioAssessment', { ...base, variantIdentity: 'SKU dourado', processedSourceAssetIds: [], supportedSourceAssetIds: [] }, 'SYSTEM'), /misturar variantes/);
+  assert.throws(() => command(states, 'media.checkpointStudioAssessment', { ...base, processedSourceAssetIds: [], supportedSourceAssetIds: ['outro-produto'] }, 'SYSTEM'), /referências inválidas/);
+  states.intake.candidates[0].supplier.images.push('https://img.test/new-original.jpg');
+  states.media = command(states, 'media.bulkSendToMedia', { productIds: ['p1'] });
+  assert.equal(states.media.productionRequests[0].sourceAssetIds.length, 32);
+  assert.equal(states.media.productionRequests[0].sourceAssessment.processedSourceAssetIds.length, 31);
+});
 test('remoção comercial preserva originais e registra responsável; operador não remove imagens aprovadas', () => {
   const states = fixture();
   states.media = command(states, 'media.bulkSendToMedia', { productIds: ['p1'] });
