@@ -17,7 +17,7 @@ export type MasterProduct = {
   fiscal?: ProductFiscal; availability?: Availability;
   createdAt: string; updatedAt: string;
 };
-export type ProductEvent = { id: string; productId: string; action: 'PRODUCAO_INICIADA' | 'RASCUNHO_ATUALIZADO' | 'PRODUTO_PRONTO' | 'VERSAO_RESTAURADA' | 'DADOS_FISCAIS_ATUALIZADOS' | 'DISPONIBILIDADE_ALTERADA' | 'PRODUTO_ARQUIVADO'; at: string; actor: string; version: number; reason?: string };
+export type ProductEvent = { id: string; productId: string; action: 'PRODUCAO_INICIADA' | 'RASCUNHO_ATUALIZADO' | 'PRODUTO_PRONTO' | 'VERSAO_RESTAURADA' | 'DADOS_FISCAIS_ATUALIZADOS' | 'DISPONIBILIDADE_ALTERADA' | 'PRODUTO_ARQUIVADO' | 'FICHA_RECONCILIADA'; at: string; actor: string; version: number; reason?: string };
 export type ProductVersionSnapshot={productId:string;version:number;snapshot:MasterProduct;at:string;actor:string};
 export type ProductFactoryState = { version: 1; products: MasterProduct[]; events: ProductEvent[]; versions?:ProductVersionSnapshot[]; completionRequests?:ProductCompletionRequest[] };
 export const PRODUCT_STORAGE_KEY = 'ddf.products.demo.v1';
@@ -99,6 +99,34 @@ export function refreshProductSupplier(state: ProductFactoryState, id: string, c
   if (sameStoredValue(spec, current.spec)) return state;
   return updateProduct(state, id, { universalTitle: current.universalTitle, shortDescription: current.shortDescription,
     longDescription: current.longDescription, category: current.category, bullets: current.bullets, benefits: current.benefits, tags: current.tags, spec }, at, actor);
+}
+
+/** Reconcile legacy sheet schemas from recorded provenance, without starting production work. */
+export function reconcileStoredProductVariants(state: ProductFactoryState, candidates: Candidate[], productIds: string[], at: string, actor: string, approvedPhotos: Record<string, number> = {}): ProductFactoryState {
+  let next = state;
+  const byCandidate = new Map(candidates.map(item => [item.id, item]));
+  for (const id of new Set(productIds)) {
+    const current = next.products.find(item => item.id === id);
+    const candidate = current && byCandidate.get(current.candidateId);
+    if (!current || current.archivedAt) continue;
+    let recovered = current;
+    if (candidate?.supplier?.variants?.length && !['ARQUIVADO', 'REJEITADO'].includes(candidate.status)) {
+      const skus = candidate.supplier.variants.map(item => item.sku?.trim());
+      if (skus.every(sku => !!sku) && new Set(skus).size === skus.length) {
+        const editable = { ...next, products: next.products.map(item => item.id === id ? { ...item, status: 'EM_PRODUCAO' as const } : item) };
+        recovered = refreshProductSupplier(editable, id, candidate, at, actor).products.find(item => item.id === id)!;
+      }
+    }
+    const saved = { ...current, spec: recovered.spec };
+    if (current.status === 'PRONTO' && (productGaps(saved).length || (approvedPhotos[id] ?? 0) < 4)) saved.status = 'EM_PRODUCAO';
+    if (sameStoredValue(saved.spec, current.spec) && saved.status === current.status) continue;
+    if (!(next.versions ?? []).some(item => item.productId === id && item.version === current.version)) {
+      next = { ...next, versions: [{ productId: id, version: current.version, snapshot: structuredClone(current), at: current.updatedAt, actor: 'system:legacy-sheet:prior-snapshot' }, ...(next.versions ?? [])] };
+    }
+    next = versioned(next, current, saved, 'FICHA_RECONCILIADA', at, actor);
+    next.events[0].reason = saved.status !== current.status ? 'Cadastro legado reconciliado; devolvido à fábrica por pendências técnicas ou fotos ainda não aprovadas. Nenhuma geração ou publicação iniciada.' : 'Ficha reconciliada com dados de origem já gravados; edições existentes preservadas.';
+  }
+  return next;
 }
 export function markProductReady(state: ProductFactoryState, id: string, at: string, approvedMedia: number, actor = 'Aprovador · controlado'): ProductFactoryState {
   const current = state.products.find(p => p.id === id);

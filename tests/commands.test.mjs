@@ -190,3 +190,16 @@ test('arquivo interno conserva origem e impede troca de URL pelo navegador', () 
   assert.equal(s.media.assets[0].bytes,123);
  } finally { if(previous===undefined) delete process.env.DDF_PUBLIC_URL; else process.env.DDF_PUBLIC_URL=previous; }
 });
+
+test('stored variant reconciliation is restricted, versioned and reads approved media from server state', () => {
+  const { s, candidateId, productId } = readyWorld();
+  s.intake.candidates[0].supplier = { name: 'AliExpress', ref: '1005001', cost: 5, currency: 'BRL', stock: 3, imageUrl: '', images: [], variants: [{ sku: 'sku-black', label: 'Preto', price: 5, stock: 3, attributes: { Cor: 'Preto' } }] };
+  s.products.products[0].status = 'PRONTO';
+  assert.throws(() => run(s, 'products.reconcileStoredVariants', { productIds: [productId] }, ctx('OPERATOR')), /não permite/i);
+  const fixed = run(s, 'products.reconcileStoredVariants', { productIds: [productId] }, ctx('SYSTEM', 'system:stored-variant-repair'));
+  assert.equal(fixed.products.products[0].spec.variants[0].sku, 'sku-black');
+  assert.equal(fixed.products.products[0].status, 'EM_PRODUCAO');
+  assert.equal(fixed.products.events[0].action, 'FICHA_RECONCILIADA');
+  assert.equal(fixed.intake.candidates[0].id, candidateId);
+  assert.deepEqual(fixed.media, s.media); assert.deepEqual(fixed.pricing, s.pricing); assert.deepEqual(fixed.catalog, s.catalog);
+});

@@ -32,6 +32,7 @@ function fixture(t, { candidate, prior } = {}) {
     './providers/supplier-stored.ts': { supplierForImageReading: value => value.supplier },
     './providers/supplier-attributes.ts': { resolveVisualAttributes: value => value.specifications ?? {} },
     './stored-variant-repair.ts': { repairStoredVariantSchemas: async () => ({ repaired: 0 }) },
+    './media-factory': { emptyMedia: { assets: [] }, approvedStudioAssets: () => [] },
     './same-value.ts': { sameStoredValue: (before, after) => JSON.stringify(before) === JSON.stringify(after) },
   };
   return { deps, get saved() { return saved; }, get calls() { return calls; } };

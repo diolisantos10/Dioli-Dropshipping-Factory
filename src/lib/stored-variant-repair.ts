@@ -1,6 +1,6 @@
 import type { IntakeState } from './intake.ts';
 import { sameStoredValue } from './same-value.ts';
-import { refreshProductSupplier, type ProductFactoryState } from './product-factory.ts';
+import { reconcileStoredProductVariants, type ProductFactoryState } from './product-factory.ts';
 
 export function storedVariantDiagnostic(intake: IntakeState, products: ProductFactoryState) {
   const candidates = new Map(intake.candidates.map(item => [item.id, item]));
@@ -16,24 +16,19 @@ export function storedVariantDiagnostic(intake: IntakeState, products: ProductFa
     orphanMastersWithSourceURL: missing.filter(item => !candidates.has(item.candidateId) && item.spec?.sourceUrl).length };
 }
 
-/** Repair only existing drafts from already recorded supplier data. No provider/AI/media calls. */
+/** Reconcile existing sheets and false-ready legacy states from recorded data. No new production work. */
 export async function repairStoredVariantSchemas(intake: IntakeState, products: ProductFactoryState,
-  apply: (productId: string) => Promise<unknown>, limit = 20) {
-  const candidates = new Map(intake.candidates.map(item => [item.id, item]));
-  let repaired = 0, repairable = 0;
+  apply: (productId: string) => Promise<unknown>, limit = 200, applyBatch?: (productIds: string[]) => Promise<unknown>, approvedPhotos: Record<string, number> = {}) {
+  let repaired = 0, repairable = 0; const targets: string[] = [];
   for (const product of products.products) {
-    const candidate = candidates.get(product.candidateId);
-    if (product.status !== 'EM_PRODUCAO' || product.archivedAt || !candidate?.supplier?.variants?.length
-      || ['ARQUIVADO', 'REJEITADO'].includes(candidate.status)) continue;
-    // An empty/duplicate SKU cannot identify which variant should receive a field.
-    const skus = candidate.supplier.variants.map(item => item.sku?.trim());
-    if (skus.some(sku => !sku) || new Set(skus).size !== skus.length) continue;
-    const preview = refreshProductSupplier(products, product.id, candidate, product.updatedAt, 'system:stored-variant-repair');
+    if (product.archivedAt) continue;
+    const preview = reconcileStoredProductVariants(products, intake.candidates, [product.id], product.updatedAt, 'system:stored-variant-repair', approvedPhotos);
     const next = preview.products.find(item => item.id === product.id)!;
-    if (sameStoredValue(next.spec?.variants, product.spec?.variants ?? [])) continue;
+    if (sameStoredValue(next.spec?.variants, product.spec?.variants ?? []) && next.status === product.status) continue;
     repairable++;
-    if (repaired < limit) { await apply(product.id); repaired++; }
+    if (targets.length < limit) targets.push(product.id);
   }
+  if (targets.length) { if (applyBatch) await applyBatch(targets); else for (const id of targets) await apply(id); repaired = targets.length; }
   return { candidateCount: intake.candidates.length,
     candidatesWithVariants: intake.candidates.filter(item => item.supplier?.variants?.length).length,
     candidatesWithoutStructuredSupplier: intake.candidates.filter(item => !item.supplier).length,

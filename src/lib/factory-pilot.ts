@@ -105,8 +105,10 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
   if (process.env.DDF_MEDIA_PAUSED === 'true') {
     const intake = ((await readState('intake'))?.payload ?? emptyIntake) as IntakeState;
     const storedProducts = ((await readState('products'))?.payload ?? emptyProductFactory) as ProductFactoryState;
+    const storedMedia = ((await readState('media'))?.payload ?? emptyMedia) as MediaState;
     const repair = await repairStoredVariantSchemas(intake, storedProducts, productId => runServerCommand('products.refreshSupplier', { productId },
-      { role: 'SYSTEM', actor: 'system:stored-variant-repair', correlationId }));
+      { role: 'SYSTEM', actor: 'system:stored-variant-repair', correlationId }), 200, productIds => runServerCommand('products.reconcileStoredVariants', { productIds },
+      { role: 'SYSTEM', actor: 'system:stored-variant-repair', correlationId }), Object.fromEntries(storedProducts.products.map(item => [item.id, approvedStudioAssets(storedMedia, item.id).length])));
     console.info('DDF_STORED_VARIANT_REPAIR', JSON.stringify(repair));
     const candidate = intake.candidates.find(item => candidateMatchesPilot(item, itemId));
     if (!candidate?.supplier || ['REJEITADO', 'ARQUIVADO'].includes(candidate.status)) return { stage: 'SOURCE', blocked: 1, code: 'pilot_origin_ineligible' };

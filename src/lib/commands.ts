@@ -3,7 +3,7 @@
 // computed payload. Identity, timestamps and IDs come from the server context, and cross-module
 // rules (approved candidate, approved media, READY product, approver role) are enforced here.
 import { addCandidate, bulkTransitionCandidates, refreshCandidateSupplier, emptyIntake, transitionCandidate, type CandidateSource, type CandidateStatus, type CandidateSupplier, type IntakeState, type SupplierFact } from './intake.ts';
-import { archiveProducts, emptyProductFactory, markProductReady, refreshProductSupplier, restoreProductVersion, setProductAvailability, startProduct, updateProduct, updateProductFiscal, type ProductFactoryState, type UniversalProductSpec } from './product-factory.ts';
+import { archiveProducts, emptyProductFactory, markProductReady, refreshProductSupplier, reconcileStoredProductVariants, restoreProductVersion, setProductAvailability, startProduct, updateProduct, updateProductFiscal, type ProductFactoryState, type UniversalProductSpec } from './product-factory.ts';
 import type { Availability, ProductFiscal, VariantLogistics } from './product-fiscal.ts';
 import { addMedia, completeTransformation, emptyMedia, enqueueTransformation, ingestSupplierOriginals, studioReadiness, reviewMedia, updateTransformationJob, type MediaAsset, type MediaState, type TransformationJob } from './media-factory.ts';
 import { bulkSendToMedia, checkpointStudioAssessment, recordMediaProductionResult, retryStudioInspection, updateMediaProductionRequest } from './media-production-queue.ts';
@@ -224,6 +224,11 @@ export const COMMANDS: Record<string, Handler> = {
     const candidate = s.intake.candidates.find(item => item.id === product?.candidateId);
     if (!candidate) throw new CommandError('Origem do cadastro não encontrada.', 404);
     return refreshProductSupplier(s.products, productId, candidate, c.at, c.actor);
+  } },
+  'products.reconcileStoredVariants': { writes: 'products', reads: ['intake', 'media'], roles: always(['ADMIN', 'SYSTEM']), run: (s, i, c) => {
+    const productIds = ids(i, 'productIds');
+    return reconcileStoredProductVariants(s.products, s.intake.candidates, productIds, c.at, c.actor,
+      Object.fromEntries(productIds.map(id => [id, studioReadiness(s.media, id).approvedCount])));
   } },
   'products.update': { writes: 'products', reads: [], roles: always([...OPERATE, 'SYSTEM']), run: (s, i, c) => updateProduct(s.products, str(i, 'productId', 80), {
     universalTitle: str(i, 'universalTitle', 300), category: str(i, 'category', 200, false), shortDescription: str(i, 'shortDescription', 1000, false),
