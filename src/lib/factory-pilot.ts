@@ -29,7 +29,14 @@ export function pilotStudioReferenceSummary(media: MediaState, productId: string
   const evidence = (request?.sourceAssessment?.evidence ?? []).join(' ').slice(0, 10_000);
   const referenceIds = new Set(request?.sourceAssetIds ?? []);
   const approved = media.assets.filter(item => item.productId === productId && referenceIds.has(item.id) && item.kind === 'ORIGINAL' && item.status === 'APROVADA');
+  const sourceMimeCounts = { jpeg: 0, png: 0, webp: 0, avif: 0, other: 0 };
+  for (const source of approved) {
+    const mime = source.mimeType;
+    const key = mime === 'image/jpeg' ? 'jpeg' : mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : mime === 'image/avif' ? 'avif' : 'other';
+    sourceMimeCounts[key]++;
+  }
   return { requestReferenceCount: referenceIds.size, availableApprovedCount: approved.length,
+    sourceMimeCounts,
     allowedReferenceCount: approved.filter(item => archiveSourceAllowed(item.sourceUrl ?? item.url)).length,
     assessmentProcessedCount: new Set(request?.sourceAssessment?.processedSourceAssetIds ?? []).size,
     assessmentSupportedCount: new Set(request?.sourceAssessment?.supportedSourceAssetIds ?? []).size,
