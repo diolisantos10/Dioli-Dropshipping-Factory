@@ -13,6 +13,7 @@ import { parseDsProduct } from './providers/aliexpress.ts';
 import { enrichSupplierPage, SUPPLIER_PAGE_REVISION } from './providers/supplier-page.ts';
 import { repairStoredVariantSchemas } from './stored-variant-repair.ts';
 import { sameStoredValue } from './same-value.ts';
+import { sourceDiagnostic } from './pilot-source-diagnostic.ts';
 import { generateGatewayText, GatewayError } from './ai-gateway';
 import { parseCommercialCopy } from './factory-production-rules';
 import { archiveSourceAllowed, persistSupplierOriginals } from './supplier-media-archive';
@@ -20,7 +21,7 @@ import { runStudioProduction } from './studio-worker';
 import { canRetryStudioInspection, STUDIO_SOURCE_SELECTION_REPAIR, STUDIO_EMPTY_VARIANT_REPAIR, STUDIO_ARCHIVED_WEBP_REPAIR } from './media-production-queue.ts';
 
 type Connection = { id: string; name: string };
-type PilotCheckpoint = { candidateId?: string; productId?: string; stage?: string; code?: string; failed?: boolean; editorial?: boolean; retryRevision?: string; sourceCount?: number; sourceRead?: number; studio?: { results?: { code?: unknown }[] } };
+type PilotCheckpoint = { candidateId?: string; productId?: string; stage?: string; code?: string; failed?: boolean; editorial?: boolean; retryRevision?: string; sourceCount?: number; sourceRead?: number; sourceStep?: string; sourceAttemptUrls?: string[]; sourceDiagnostic?: ReturnType<typeof sourceDiagnostic>; sourceResponse?: { text: string; providerId: string; modelId: string }; sourceProbeCompleted?: boolean; sourceFailureHistory?: Record<string, unknown>[]; studio?: { results?: { code?: unknown }[] } };
 const SAFE_GAPS = new Set(['Título universal', 'Categoria', 'Descrição curta', 'Descrição longa', 'Material', 'Peso confirmado de cada item', 'Dimensões confirmadas de cada item']);
 export function technicalEvidenceCounts(supplier: CandidateSupplier) {
   const evidence = supplier.visualAttributes ?? [];
@@ -197,6 +198,9 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
   // Operator explicitly acknowledges one technical routing repair. This cannot retry paid image work,
   // budget/access failures, or the same revision twice, even when the attempted repair also fails.
   const reviewedRepair = prior?.code === 'gateway_provider_invalid_request'
+    // Explicit user request: one diagnostic source probe after adding exception retention.
+    || (prior?.code === 'pilot_step_failed' && prior.stage === 'SOURCE' && !prior.sourceDiagnostic
+      && retryRevision === 'source-diagnostic-single-1')
     || (['gateway_unavailable', 'gateway_provider_timeout'].includes(prior?.code ?? '') && /^vision-latency-repair-/.test(retryRevision ?? ''));
   const sourceRetry = prior?.failed && reviewedRepair && prior.stage === 'SOURCE'
     && !!retryRevision && /^[a-zA-Z0-9_-]{1,80}$/.test(retryRevision) && retryRevision !== prior.retryRevision;
@@ -234,6 +238,8 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
   }
   const checkpoint: PilotCheckpoint = { ...prior };
   if (sourceRetry) {
+    checkpoint.sourceFailureHistory = [...(checkpoint.sourceFailureHistory ?? []), { stage: prior?.stage, code: prior?.code,
+      sourceCount: prior?.sourceCount, sourceRead: prior?.sourceRead, retryRevision: prior?.retryRevision }];
     checkpoint.failed = false;
     delete checkpoint.code;
     checkpoint.retryRevision = retryRevision;
@@ -261,6 +267,9 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
     if (candidate && ['REJEITADO', 'ARQUIVADO'].includes(candidate.status)) return save('BLOCKED', 'SOURCE', { blocked: 1, code: 'pilot_origin_ineligible' });
     const existing = candidate && (await loadProducts()).products.find(item => item.candidateId === candidate!.id);
     if (existing?.archivedAt) return save('BLOCKED', 'PRODUCT', { blocked: 1, code: 'pilot_product_archived' });
+    const photoLimit = process.env.DDF_PILOT_MAX_APPROVED_PHOTOS === '1' ? 1 : 4;
+    if (existing && approvedStudioAssets(await loadMedia(), existing.id).length >= photoLimit && photoLimit === 1)
+      return save('BLOCKED', 'STUDIO', { approvedPhotos: 1, blocked: 1, code: 'pilot_single_photo_verified' });
     if (!candidate?.supplier || !checkpoint.candidateId) {
       checkpoint.stage = 'SUPPLIER';
       const connections = (await db.query("SELECT id,name FROM integration_configs WHERE kind='SUPPLIER' AND provider_key='aliexpress' AND status IN ('TESTED','ACTIVE') ORDER BY status='ACTIVE' DESC,updated_at DESC")).rows as Connection[];
@@ -288,8 +297,28 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
     if (!supplier?.images.length) return save('BLOCKED', 'SOURCE', { blocked: 1, code: 'source_images_missing', sourceCount: 0 });
     checkpoint.sourceCount = supplier.images.length;
     checkpoint.sourceRead = supplier.vision?.processedImages.length ?? 0;
-    const read = await readSupplierImages(supplier, `candidate:${candidate.id}:pilot`, generateGatewayText);
+    const singleProbe = retryRevision === 'source-diagnostic-single-1' && !checkpoint.sourceProbeCompleted;
+    const processedSources = supplier.vision && supplier.vision.revision === SUPPLIER_VISION_REVISION ? supplier.vision.processedImages : [];
+    checkpoint.sourceAttemptUrls = supplier.images.filter(url => !processedSources.includes(url)).slice(0, singleProbe ? 1 : 8);
+    checkpoint.sourceStep = 'gateway_request';
+    // Consume the attempt before paying. Persist the response before parsing so a parsing
+    // failure can be investigated without paying again. No model text is emitted in logs.
+    await save('PROCESSING', 'SOURCE', { failed: true, code: 'pilot_source_read_interrupted' });
+    const read = await readSupplierImages(supplier, `candidate:${candidate.id}:pilot`, async request => {
+      const result = await generateGatewayText({ ...request, correlationId });
+      checkpoint.sourceStep = 'response_validation';
+      checkpoint.sourceResponse = { text: result.text.slice(0, 100_000), providerId: result.providerId, modelId: result.modelId };
+      await save('PROCESSING', 'SOURCE', { failed: true, code: 'pilot_source_read_interrupted' });
+      return result;
+    }, { batchSize: singleProbe ? 1 : 8 });
+    checkpoint.sourceStep = 'supplier_state_write';
     await command('intake.refreshSupplier', { candidateId: candidate.id, supplier: read }, true);
+    checkpoint.failed = false;
+    delete checkpoint.code;
+    if (singleProbe) checkpoint.sourceProbeCompleted = true;
+    console.info('DDF_PILOT_SOURCE_READ', JSON.stringify({ sourceRead: read.vision?.processedImages.length ?? 0,
+      sourceCount: read.images.length, batchSize: checkpoint.sourceAttemptUrls.length,
+      providerId: checkpoint.sourceResponse?.providerId, modelId: checkpoint.sourceResponse?.modelId }));
     const counts = { sourceCount: read.images.length, sourceRead: read.vision?.processedImages.length ?? 0 };
     Object.assign(checkpoint, counts);
     if (!read.vision?.completed) return save('PROCESSING', 'SOURCE', { ...counts, continuing: 1 });
@@ -351,6 +380,11 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
   } catch (error) {
     checkpoint.failed = true;
     checkpoint.code = pilotErrorCode(error);
+    if (checkpoint.stage === 'SOURCE') {
+      const secrets = Object.entries(process.env).filter(([key]) => /TOKEN|SECRET|PASSWORD|DATABASE_URL|CREDENTIALS_KEY|APP_KEY/.test(key)).map(([, value]) => value ?? '');
+      checkpoint.sourceDiagnostic = sourceDiagnostic(error, checkpoint.sourceAttemptUrls ?? [], checkpoint.sourceStep ?? 'source_setup', secrets);
+      console.error('DDF_PILOT_SOURCE_EXCEPTION', JSON.stringify(checkpoint.sourceDiagnostic));
+    }
     return save('FAILED', checkpoint.stage ?? 'SUPPLIER', { failed: 1, code: checkpoint.code, sourceCount: checkpoint.sourceCount ?? 0, sourceRead: checkpoint.sourceRead ?? 0 });
   }
 }

@@ -35,6 +35,8 @@ function fixture(t, { candidate, prior } = {}) {
       if (name === 'products.start') products.push({ id: 'draft', candidateId: candidate.id, status: 'EM_PRODUCAO', spec: { variants: [] } });
     } },
     './product-factory': { emptyProductFactory: { products: [], events: [] } }, './intake': { emptyIntake: { candidates: [] } },
+    './media-factory': { emptyMedia: { assets: [] }, approvedStudioAssets: () => [] },
+    './pilot-source-diagnostic.ts': { sourceDiagnostic: (error, sourceUrls, step) => ({ message: error.message, stack: error.stack, sourceUrls, step }) },
     './ai-gateway': { GatewayError: class extends Error {}, generateGatewayText: async () => { throw new Error('Unexpected paid call'); } },
     './providers/supplier-stored.ts': { supplierForImageReading: value => value.supplier },
     './providers/supplier-attributes.ts': { resolveVisualAttributes: value => value.specifications ?? {} },
@@ -143,6 +145,45 @@ test('failed source admission never changes rejected, archived or information-re
     assert.equal(fx.calls, 0);
     assert.equal(fx.saved, undefined);
   }
+});
+
+test('single diagnostic retry retains the provider response and exception and cannot repeat the consumed revision', async t => {
+  const candidate = { id: 'c', status: 'APROVADO', supplier: { ref: '1005013226256365', images: ['https://ae01.alicdn.com/one.webp', 'https://ae01.alicdn.com/two.webp'] } };
+  const fx = fixture(t, { candidate, prior: { candidateId: 'c', failed: true, stage: 'SOURCE', code: 'pilot_step_failed' } });
+  process.env.DDF_PILOT_RETRY_REVISION = 'source-diagnostic-single-1';
+  let calls = 0;
+  fx.deps['./ai-gateway'].generateGatewayText = async () => { calls++; return { text: 'invalid-json', providerId: 'provider', modelId: 'model' }; };
+  fx.deps['./providers/supplier-vision.ts'] = { SUPPLIER_VISION_REVISION: 2, readSupplierImages: async (_supplier, _ref, generate, options) => {
+    assert.equal(options.batchSize, 1);
+    await generate({});
+    assert.equal(fx.saved.failed, true, 'interrupted diagnostic cannot auto retry');
+    assert.equal(fx.saved.sourceResponse.text, 'invalid-json', 'response retained before parsing');
+    throw new Error('Leitura visual devolveu JSON inválido');
+  } };
+  await load(fx.deps).runFactoryPilot('cron', 'corr');
+  assert.equal(calls, 1);
+  assert.equal(fx.saved.sourceDiagnostic.step, 'response_validation');
+  assert.match(fx.saved.sourceDiagnostic.message, /JSON inválido/);
+  assert.deepEqual(fx.saved.sourceDiagnostic.sourceUrls, ['https://ae01.alicdn.com/one.webp']);
+  assert.equal(fx.saved.sourceFailureHistory[0].code, 'pilot_step_failed');
+  const second = fixture(t, { candidate, prior: fx.saved });
+  process.env.DDF_PILOT_RETRY_REVISION = 'source-diagnostic-single-1';
+  await load(second.deps).runFactoryPilot('cron', 'corr');
+  assert.equal(second.calls, 0);
+});
+
+test('one-photo limit stops additional paid work after the first independently approved image', async t => {
+  const previous = process.env.DDF_PILOT_MAX_APPROVED_PHOTOS;
+  process.env.DDF_PILOT_MAX_APPROVED_PHOTOS = '1';
+  t.after(() => { if (previous === undefined) delete process.env.DDF_PILOT_MAX_APPROVED_PHOTOS; else process.env.DDF_PILOT_MAX_APPROVED_PHOTOS = previous; });
+  const candidate = { id: 'c', status: 'APROVADO', supplier: { ref: '1005013226256365' } };
+  const fx = fixture(t, { candidate, prior: { candidateId: 'c', productId: 'draft' } });
+  fx.products.push({ id: 'draft', candidateId: 'c', status: 'EM_PRODUCAO' });
+  fx.deps['./media-factory'].approvedStudioAssets = () => [{ id: 'approved-one' }];
+  const result = await load(fx.deps).runFactoryPilot('cron', 'corr');
+  assert.equal(result.code, 'pilot_single_photo_verified');
+  assert.equal(result.approvedPhotos, 1);
+  assert.equal(fx.calls, 0);
 });
 
 test('operator revision consumes exactly one SOURCE routing retry and another failure freezes', async t => {

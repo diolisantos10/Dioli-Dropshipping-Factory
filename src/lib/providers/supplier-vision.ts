@@ -8,10 +8,12 @@ const REVISION = SUPPLIER_VISION_REVISION;
 type Generate = (request: GatewayTextRequest) => Promise<GatewayTextResult>;
 
 /** Eight originals per batch; checkpoint progress so every original can be read. */
-export async function readSupplierImages(supplier: CandidateSupplier, payloadRef: string, generate: Generate): Promise<CandidateSupplier> {
+export async function readSupplierImages(supplier: CandidateSupplier, payloadRef: string, generate: Generate, options: { batchSize?: number } = {}): Promise<CandidateSupplier> {
   const images = [...new Set(supplier.images)];
   const processed = supplier.vision?.revision === REVISION ? supplier.vision.processedImages.filter(url => images.includes(url)) : [];
-  const batch = images.filter(url => !processed.includes(url)).slice(0, 8);
+  const batchSize = options.batchSize ?? 8;
+  if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 8) throw new Error('Lote visual deve conter de 1 a 8 fontes.');
+  const batch = images.filter(url => !processed.includes(url)).slice(0, batchSize);
   if (!batch.length) return supplier;
   const result = await generate({ roleAddress: 'dioli.ddf.supplier-import', workClass: 'source_grounded_research', payloadRef,
     referenceImages: batch, maxTokens: 6000, timeoutMs: 200_000,

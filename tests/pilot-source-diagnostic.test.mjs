@@ -1,0 +1,20 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { Script } from 'node:vm';
+import ts from 'typescript';
+const code = ts.transpileModule(readFileSync(new URL('../src/lib/pilot-source-diagnostic.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
+const loaded = { exports: {} };
+new Script(`(function(module,exports){${code}\n})`).runInThisContext()(loaded, loaded.exports);
+test('diagnostics retain message, stack and source pathname without credentials or signed queries', () => {
+  const secret = 'private-token-12345';
+  const error = new Error(`Invalid source ${secret} https://user:pass@example.test/source.webp?token=hidden`);
+  const result = loaded.exports.sourceDiagnostic(error, ['https://ae01.alicdn.com/spec.webp?signature=private'], 'response_validation', [secret]);
+  assert.match(result.message, /Invalid source/);
+  assert.match(result.stack, /Error: Invalid source/);
+  assert.deepEqual(result.sourceUrls, ['https://ae01.alicdn.com/spec.webp']);
+  assert.ok(!JSON.stringify(result).includes(secret));
+  assert.ok(!JSON.stringify(result).includes('hidden'));
+  assert.ok(!JSON.stringify(result).includes('user:pass'));
+  assert.ok(!JSON.stringify(result).includes('signature='));
+});
