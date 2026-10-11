@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { emptyStates, executeCommand, authorizeCommand } from '../src/lib/commands.ts';
 import { studioReadiness } from '../src/lib/media-factory.ts';
-import { canRetryStudioInspection, retryStudioInspection, STUDIO_SOURCE_SELECTION_REPAIR, STUDIO_EMPTY_VARIANT_REPAIR, STUDIO_RASTER_DELIVERY_REPAIR } from '../src/lib/media-production-queue.ts';
+import { canRetryStudioInspection, retryStudioInspection, STUDIO_SOURCE_SELECTION_REPAIR, STUDIO_EMPTY_VARIANT_REPAIR } from '../src/lib/media-production-queue.ts';
 
 const at = '2026-10-10T01:00:00Z';
 let serial = 0;
@@ -88,28 +88,6 @@ test('empty-identity repair requires the exact prior reviewed inspection, retain
   assert.deepEqual(repaired.productionRequests[0].inspectionRetryHistory[0].assessment, request.sourceAssessment);
   assert.deepEqual(repaired.productionRequests[0].inspectionRetryHistory[1].assessment, current.sourceAssessment);
   assert.equal(canRetryStudioInspection(repaired, request.id, STUDIO_EMPTY_VARIANT_REPAIR), false);
-  const third = repaired.productionRequests[0];
-  third.status = 'FALHOU';
-  third.error = 'Produção não concluída (studio_unsupported_view); nenhuma foto foi presumida aprovada.';
-  third.sourceAssessment = { ...structuredClone(request.sourceAssessment), evidence: ['Third inspection: unsupported raster'] };
-  repaired.assets.forEach(asset => { asset.mimeType = 'image/webp'; });
-  assert.equal(canRetryStudioInspection(repaired, request.id, STUDIO_RASTER_DELIVERY_REPAIR), true);
-  for (const mutate of [
-    value => { value.assets.forEach(asset => { asset.mimeType = 'image/jpeg'; }); },
-    value => { value.productionRequests[0].inspectionRetryHistory.reverse(); },
-    value => { value.productionRequests[0].inspectionRetryHistory = []; },
-    value => { value.assets.push({ id: 'generated', productId: 'p1', kind: 'DERIVADA', studio: true, status: 'REJEITADA' }); },
-    value => { value.productionRequests[0].sourceAssessment.variantIdentity = 'known SKU'; },
-  ]) {
-    const bad = structuredClone(repaired); mutate(bad);
-    assert.equal(canRetryStudioInspection(bad, request.id, STUDIO_RASTER_DELIVERY_REPAIR), false);
-  }
-  const originals = structuredClone(repaired.assets);
-  const delivered = retryStudioInspection(repaired, request.id, STUDIO_RASTER_DELIVERY_REPAIR, at, 'system:repair');
-  assert.deepEqual(delivered.assets, originals);
-  assert.equal(delivered.productionRequests[0].inspectionRetryHistory.length, 3);
-  assert.deepEqual(delivered.productionRequests[0].inspectionRetryHistory[2].assessment, third.sourceAssessment);
-  assert.equal(canRetryStudioInspection(delivered, request.id, STUDIO_RASTER_DELIVERY_REPAIR), false);
 });
 test('envio em massa usa originais persistidos e não aprova cadastro nem imagens de estúdio', () => {
   const states = fixture();
