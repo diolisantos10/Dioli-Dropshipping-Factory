@@ -65,11 +65,11 @@ export function refreshProductSupplier(state: ProductFactoryState, id: string, c
   if (!current || current.candidateId !== candidate.id) throw new Error('Origem do cadastro não encontrada.');
   if (current.status === 'PRONTO' || current.archivedAt || !candidate.supplier) return state;
   const source = startProduct(emptyProductFactory, { ...candidate, status: 'APROVADO' }, id, at, actor).products[0].spec!;
-  const spec = structuredClone(current.spec ?? emptyUniversalSpec);
-  const technical = spec.technical ?? structuredClone(emptyTechnical);
+  const spec: UniversalProductSpec = { ...structuredClone(emptyUniversalSpec), ...structuredClone(current.spec ?? {}) };
+  const technical = { ...structuredClone(emptyTechnical), ...spec.technical };
   const incoming = source.technical!;
-  const fillDimensions = (before: ProductTechnical['dimensions'], after: ProductTechnical['dimensions']) => ({
-    lengthCm: before.lengthCm ?? after.lengthCm, widthCm: before.widthCm ?? after.widthCm, heightCm: before.heightCm ?? after.heightCm,
+  const fillDimensions = (before: ProductTechnical['dimensions'] | undefined, after: ProductTechnical['dimensions']) => ({
+    lengthCm: before?.lengthCm ?? after.lengthCm, widthCm: before?.widthCm ?? after.widthCm, heightCm: before?.heightCm ?? after.heightCm,
   });
   spec.technical = { ...technical, dimensions: fillDimensions(technical.dimensions, incoming.dimensions),
     weightGrams: technical.weightGrams ?? incoming.weightGrams,

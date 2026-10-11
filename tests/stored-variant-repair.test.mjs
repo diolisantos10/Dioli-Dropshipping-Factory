@@ -29,3 +29,11 @@ test('missing origins, ambiguous SKUs, ready and archived products are never cha
   const result = await repairStoredVariantSchemas({ candidates: [legacy] }, ready, async () => assert.fail('invented'));
   assert.equal(result.candidatesWithoutStructuredSupplier, 1); assert.equal(result.candidatesWithoutRecordedVariants, 1);
 });
+
+test('older partial master schemas recover stored variants without crashing', async () => {
+  let products = startProduct(emptyProductFactory, candidate, 'p', 'now');
+  products.products[0].spec = { variants: [] };
+  const result = await repairStoredVariantSchemas({ candidates: [candidate] }, products, async id => { products = refreshProductSupplier(products, id, candidate, 'later', 'system:stored-variant-repair'); });
+  assert.equal(result.repaired, 1); assert.equal(products.products[0].spec.variants.length, 2);
+  assert.deepEqual(products.products[0].spec.materials, []);
+});
