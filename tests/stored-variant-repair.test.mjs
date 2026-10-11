@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { repairStoredVariantSchemas } from '../src/lib/stored-variant-repair.ts';
+import { repairStoredVariantSchemas, storedVariantDiagnostic } from '../src/lib/stored-variant-repair.ts';
 import { emptyProductFactory, startProduct, refreshProductSupplier } from '../src/lib/product-factory.ts';
 const variant = (sku, attributes = {}) => ({ sku, label: sku, attributes, price: 5, stock: null });
 const candidate = { id: 'c', name: 'Óculos', url: 'https://www.aliexpress.com/item/1005013226256365.html', notes: '', status: 'APROVADO', createdAt: 'now', supplier: { name: 'AliExpress', ref: '1005013226256365', cost: 5, currency: 'BRL', stock: null, imageUrl: '', images: [], variants: [variant('black', { Cor: 'Preto', Lente: 'PC' }), variant('brown', { Cor: 'Marrom' })] } };
@@ -36,4 +36,12 @@ test('older partial master schemas recover stored variants without crashing', as
   const result = await repairStoredVariantSchemas({ candidates: [candidate] }, products, async id => { products = refreshProductSupplier(products, id, candidate, 'later', 'system:stored-variant-repair'); });
   assert.equal(result.repaired, 1); assert.equal(products.products[0].spec.variants.length, 2);
   assert.deepEqual(products.products[0].spec.materials, []);
+});
+
+test('diagnostics distinguish archived, ready, active and orphan masters without exporting private data', () => {
+  const product = startProduct(emptyProductFactory, candidate, 'p', 'now').products[0];
+  product.spec.variants = [];
+  const report = storedVariantDiagnostic({ candidates: [candidate] }, { products: [product, { ...product, id: 'archived', archivedAt: 'now' }, { ...product, id: 'ready', status: 'PRONTO' }, { ...product, id: 'orphan', candidateId: 'missing', spec: { variants: [], sourceUrl: candidate.url } }] });
+  assert.equal(report.archivedMissingVariants, 1); assert.equal(report.readyMissingVariants, 1); assert.equal(report.activeDraftMissingVariants, 2); assert.equal(report.orphanMasterCount, 1); assert.equal(report.orphanMastersWithSourceURL, 1);
+  assert.ok(!JSON.stringify(report).includes(candidate.url)); assert.ok(!JSON.stringify(report).includes('SKU'));
 });

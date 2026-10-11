@@ -1,6 +1,20 @@
 import type { IntakeState } from './intake.ts';
 import { refreshProductSupplier, type ProductFactoryState } from './product-factory.ts';
 
+export function storedVariantDiagnostic(intake: IntakeState, products: ProductFactoryState) {
+  const candidates = new Map(intake.candidates.map(item => [item.id, item]));
+  const missing = products.products.filter(item => !item.spec?.variants?.length);
+  const activeDrafts = missing.filter(item => item.status === 'EM_PRODUCAO' && !item.archivedAt);
+  return { masterCount: products.products.length, missingVariants: missing.length,
+    archivedMissingVariants: missing.filter(item => item.archivedAt).length,
+    readyMissingVariants: missing.filter(item => item.status === 'PRONTO' && !item.archivedAt).length,
+    activeDraftMissingVariants: activeDrafts.length,
+    orphanMasterCount: missing.filter(item => !candidates.has(item.candidateId)).length,
+    activeDraftSourcesWithVariants: activeDrafts.filter(item => candidates.get(item.candidateId)?.supplier?.variants?.length).length,
+    activeDraftSourcesIneligible: activeDrafts.filter(item => ['ARQUIVADO', 'REJEITADO'].includes(candidates.get(item.candidateId)?.status ?? '')).length,
+    orphanMastersWithSourceURL: missing.filter(item => !candidates.has(item.candidateId) && item.spec?.sourceUrl).length };
+}
+
 /** Repair only existing drafts from already recorded supplier data. No provider/AI/media calls. */
 export async function repairStoredVariantSchemas(intake: IntakeState, products: ProductFactoryState,
   apply: (productId: string) => Promise<unknown>, limit = 20) {
