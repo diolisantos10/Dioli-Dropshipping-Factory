@@ -17,7 +17,7 @@ try {
   let started = false;
   for (let attempt = 0; attempt < 80; attempt++) { try { if ((await fetch(`${base}/visao-geral`, { headers: { authorization: auth } })).ok) { started = true; break; } } catch {} await new Promise(resolve => setTimeout(resolve, 250)); }
   assert.ok(started, output);
-  browser = await chromium.launch({ headless: true, ...(process.env.DDF_BROWSER_EXECUTABLE_PATH ? { executablePath: process.env.DDF_BROWSER_EXECUTABLE_PATH } : {}) });
+  browser = await chromium.launch({ headless: true, ...(process.env.DDF_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.DDF_CHROMIUM_EXECUTABLE_PATH } : {}) });
   const context = await browser.newContext({ httpCredentials: { username: 'interface-test', password: 'local-variant-test-password' }, viewport: { width: 1280, height: 900 } });
   await context.route('**/api/state/*', route => { const namespace = new URL(route.request().url()).pathname.split('/').pop(); return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ payload: states[namespace], revision: 1 }) }); });
   const page = await context.newPage();
