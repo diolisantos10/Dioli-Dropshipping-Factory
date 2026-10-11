@@ -98,3 +98,16 @@ test('every shelf exposes full variant attributes and measurements without flatt
   const legacy = candidateCard(candidate('legacy'));
   assert.equal(legacy.variants.length, 0);
 });
+
+
+test('legacy master displays source variants explicitly without changing its saved specification', () => {
+  const product = { id: 'old', universalTitle: 'Óculos antigo', category: 'Moda', shortDescription: '', longDescription: '', tags: [], spec: { variants: [], materials: [], destinationGaps: {} } };
+  const record = { product, media: [], offers: [], prices: [] };
+  const card = productCard(record, candidate('old-source', { supplier: supplier(5) }));
+  assert.equal(card.variantsFromSource, true);
+  assert.equal(card.variants[0].sku, 's1');
+  assert.deepEqual(product.spec.variants, []);
+  const missing = productCard(record);
+  assert.equal(missing.variantsFromSource, false);
+  assert.deepEqual(missing.variants, []);
+});

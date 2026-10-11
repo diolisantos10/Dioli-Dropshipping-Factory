@@ -12,7 +12,7 @@ const supplier = { name: 'Fornecedor teste', ref: '1005013226256365', cost: 19, 
 const candidate = (id, status) => ({ id, name: `Óculos ${id}`, url: 'https://www.aliexpress.com/item/1005013226256365.html', notes: '', status, createdAt: '2026-10-11', supplier });
 const spec = { variants: [{ ...sourceVariant, id: 'v1', title: sourceVariant.label, gtin: '' }], materials: ['PC'], colors: [], sizes: [], seo: { title: '', description: '' }, compliance: { notes: '', certifications: [] }, localizations: {}, destinationGaps: {} };
 const product = (id, status) => ({ id, candidateId: 'raw', universalTitle: `Óculos ${id}`, shortDescription: 'Óculos', longDescription: 'Descrição', category: 'Óculos', bullets: [], benefits: [], tags: [], status, version: 1, createdAt: '2026-10-11', updatedAt: '2026-10-11', spec });
-const states = { intake: { version: 1, candidates: [candidate('raw', 'CANDIDATO'), candidate('triage', 'TRIADO'), { ...candidate('legacy', 'CANDIDATO'), supplier: undefined }], events: [] }, products: { version: 1, products: [product('draft', 'EM_PRODUCAO'), product('ready', 'PRONTO')], events: [] }, media: { version: 1, assets: [{ id: 'raw-reference', productId: 'ready', kind: 'ORIGINAL', status: 'APROVADA', url: 'https://fixture.invalid/reference.png' }, ...['front', 'back', 'left', 'right'].map(angle => ({ id: angle, productId: 'ready', kind: 'DERIVADA', status: 'APROVADA', studio: true, studioAngle: angle, url: `https://fixture.invalid/${angle}.png`, mimeType: 'image/png', sourceAssetIds: ['raw-reference'], fidelityVerified: true, fidelityEvidence: 'Test fixture only; no real product or generation' }))], events: [] } };
+const states = { intake: { version: 1, candidates: [candidate('raw', 'CANDIDATO'), candidate('triage', 'TRIADO'), { ...candidate('legacy', 'CANDIDATO'), supplier: undefined }], events: [] }, products: { version: 1, products: [product('draft', 'EM_PRODUCAO'), product('ready', 'PRONTO'), { ...product('legacy-ready', 'PRONTO'), spec: { ...spec, variants: [] } }], events: [] }, media: { version: 1, assets: [{ id: 'raw-reference', productId: 'ready', kind: 'ORIGINAL', status: 'APROVADA', url: 'https://fixture.invalid/reference.png' }, ...['front', 'back', 'left', 'right'].map(angle => ({ id: angle, productId: 'ready', kind: 'DERIVADA', status: 'APROVADA', studio: true, studioAngle: angle, url: `https://fixture.invalid/${angle}.png`, mimeType: 'image/png', sourceAssetIds: ['raw-reference'], fidelityVerified: true, fidelityEvidence: 'Test fixture only; no real product or generation' }))], events: [] } };
 try {
   let started = false;
   for (let attempt = 0; attempt < 80; attempt++) { try { if ((await fetch(`${base}/visao-geral`, { headers: { authorization: auth } })).ok) { started = true; break; } } catch {} await new Promise(resolve => setTimeout(resolve, 250)); }
@@ -32,6 +32,15 @@ try {
     assert.ok((await section.innerText()).includes('14,6 cm × 14 cm × 3,2 cm'), path);
     await page.getByRole('button', { name: 'Fechar', exact: true }).click();
   }
+  await page.goto(base + '/product-factory');
+  await page.getByRole('button', { name: 'Abrir Óculos legacy-ready', exact: true }).click();
+  const originSection = page.getByRole('region', { name: 'Ficha das variantes', exact: true });
+  await originSection.getByText('Variantes registradas na origem (1)', { exact: true }).waitFor();
+  await originSection.getByText('SKU: SKU-PRETO', { exact: true }).waitFor();
+  await originSection.getByText('Atributo longo preservado até o fim da informação', { exact: true }).waitFor();
+  assert.ok((await originSection.innerText()).includes('ainda não constam na versão salva da ficha'));
+  assert.equal(states.products.products.find(item => item.id === 'legacy-ready').spec.variants.length, 0);
+  await page.getByRole('button', { name: 'Fechar', exact: true }).click();
   await page.goto(base + '/prateleira-bruta');
   await page.getByRole('button', { name: 'Abrir detalhes de Óculos legacy', exact: true }).click();
   await page.getByText('Variantes ainda não registradas nesta ficha.', { exact: false }).waitFor();

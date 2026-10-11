@@ -15,6 +15,7 @@ export type StoreCard = {
   category: string; url: string; description: string; variants: CardVariant[]; searchText: string;
   // Stock model badge; only master products carry it (candidates have no stock model yet).
   availability?: Availability; fiscalCompletion?: number; sourceDetails?: CandidateSupplier;
+  variantsFromSource?: boolean;
   technicalGaps?: { dimensions: boolean; weight: boolean; material: boolean };
 };
 export type StoreFilters = { query?: string; minCost?: string; maxCost?: string; supplier?: string; state?: string; availability?: string; category?: string; eyewearOnly?: boolean; missing?: '' | 'dimensions' | 'weight' | 'material' | 'any' };
@@ -101,6 +102,7 @@ export function productCard(record: CatalogRecord, candidate?: Candidate, curati
     supplier: cheapest?.supplierName ?? origin?.supplier ?? 'Sem fornecedor', supplierRef: cheapest?.supplierRef ?? origin?.supplierRef ?? '',
     state, stateLabel: curationLabels[state], category: product.category, url: origin?.url || product.spec?.sourceUrl || '',
     description: product.shortDescription || product.longDescription, variants: variants.length ? variants : origin?.variants ?? [],
+    variantsFromSource: !variants.length && !!origin?.variants.length,
     availability: product.availability, fiscalCompletion: fiscalCompletion(product), technicalGaps: productMissingTechnical(product),
   };
   const skus = (product.spec?.variants ?? []).map(item => `${item.sku} ${item.title}`);

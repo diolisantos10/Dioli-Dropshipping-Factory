@@ -172,7 +172,7 @@ function ProductDetail({ card, onClose, children }: { card: StoreCard; onClose: 
           {card.url && <a className="inline-block break-all text-sm underline" href={card.url} target="_blank" rel="noreferrer noopener">Abrir página de origem</a>}
           <section><h3 className="font-semibold">Descrição do produto</h3><p className="mt-2 whitespace-pre-wrap text-sm text-[var(--muted)]">{card.description || 'Não informada pelo fornecedor.'}</p></section>
           {card.sourceDetails && <SupplierInformation supplier={card.sourceDetails} />}
-          <VariantDetails variants={card.variants} currency={card.currency} />
+          <VariantDetails variants={card.variants} currency={card.currency} fromSource={card.variantsFromSource} />
         </div>
       </div>
       {children && <div className="border-t border-[var(--line)] p-4 sm:p-6">{children}</div>}
