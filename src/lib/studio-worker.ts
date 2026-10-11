@@ -11,6 +11,7 @@ import { archivedStudioReference } from './studio-reference-transport';
 const identity = { role: 'SYSTEM', actor: 'system:studio-production' };
 /** Bounded worker: up to three independent products per cron, one image per request, at most 45 source photos per run, explicit handoff required. */
 export async function runStudioProduction(correlationId: string, targetProductIds?: string[]) {
+  if (process.env.DDF_MEDIA_PAUSED === 'true') return { checked: 0, reason: 'studio_paused_by_user' };
   const db = await getDatabasePool();
   const lock = await db.connect();
   const acquired = (await lock.query("SELECT pg_try_advisory_lock(hashtext('ddf:studio-production')) AS acquired")).rows[0]?.acquired;

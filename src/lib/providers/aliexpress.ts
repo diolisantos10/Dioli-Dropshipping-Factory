@@ -1,6 +1,8 @@
+import { aliexpressPageAccess, supplierPageUrl } from './supplier-page-access.ts';
 import { createHmac } from 'node:crypto';
 import type { SupplierAdapter, SupplierProduct } from './types';
 import { supplierDescriptionContent, supplierMobileContent, supplierMeasurements, SUPPLIER_IMPORT_REVISION } from './supplier-content.ts';
+import { enrichSupplierPage } from './supplier-page.ts';
 
 // AliExpress Open Platform (IOP/GOP protocol). Business APIs go through /sync with
 // `method` as a signed parameter; system APIs (/auth/*) go through /rest{path} and
@@ -314,7 +316,8 @@ export function createAliExpressAdapter(
       const body = await callAliExpressBusiness('aliexpress.ds.product.get', credentials, {
         product_id: itemId, ship_to_country: country, target_currency: defaultCurrency, target_language: language.toLowerCase(),
       });
-      return parseDsProduct(body, itemId, defaultCurrency);
+      const product = parseDsProduct(body, itemId, defaultCurrency);
+      return process.env.DDF_SUPPLIER_PAGE_ENABLED === 'true' ? enrichSupplierPage(product, { itemId: product.itemId, url: supplierPageUrl(product.itemId), title: product.title }, aliexpressPageAccess) : product;
     },
   };
 }

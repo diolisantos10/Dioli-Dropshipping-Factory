@@ -33,6 +33,40 @@ function fixture(t, { candidate, prior } = {}) {
   };
   return { deps, get saved() { return saved; }, get calls() { return calls; } };
 }
+test('media pause reads only pilot technical data and preserves failed studio history', async t => {
+  const previous = process.env.DDF_MEDIA_PAUSED;
+  process.env.DDF_MEDIA_PAUSED = 'true';
+  t.after(() => { if (previous === undefined) delete process.env.DDF_MEDIA_PAUSED; else process.env.DDF_MEDIA_PAUSED = previous; });
+  const prior = { failed: true, stage: 'STUDIO', code: 'studio_unsupported_view', studio: { results: [{ code: 'studio_unsupported_view' }] } };
+  const snapshot = structuredClone(prior);
+  const candidate = { id: 'pilot', status: 'CANDIDATO', supplier: { ref: '1005013226256365', images: ['https://ae01.alicdn.com/spec.jpg'] } };
+  const fx = fixture(t, { candidate, prior });
+  fx.deps['./providers/supplier-vision.ts'] = { SUPPLIER_VISION_REVISION: 2, readSupplierImages: async supplier => {
+    assert.equal(candidate.supplier.technicalReadFailure.code, 'technical_source_read_interrupted');
+    return { ...supplier, specifications: { 'Largura da lente': '57 mm' }, vision: { revision: 2, completed: true, processedImages: supplier.images } };
+  } };
+  const result = await load(fx.deps).runFactoryPilot('cron', 'corr');
+  assert.equal(result.stage, 'TECHNICAL_DATA');
+  assert.equal(result.mediaPaused, true);
+  assert.equal(result.technicalAttributes, 1);
+  assert.deepEqual(prior, snapshot);
+  assert.equal(fx.saved, undefined);
+  assert.equal(candidate.supplier.technicalReadFailure, undefined);
+});
+test('technical failure blocks another paid call while photos are paused', async t => {
+  const previous = process.env.DDF_MEDIA_PAUSED;
+  process.env.DDF_MEDIA_PAUSED = 'true';
+  t.after(() => { if (previous === undefined) delete process.env.DDF_MEDIA_PAUSED; else process.env.DDF_MEDIA_PAUSED = previous; });
+  const candidate = { id: 'pilot', status: 'CANDIDATO', supplier: { ref: '1005013226256365', images: ['https://ae01.alicdn.com/spec.jpg'] } };
+  const fx = fixture(t, { candidate });
+  let reads = 0;
+  fx.deps['./providers/supplier-vision.ts'] = { SUPPLIER_VISION_REVISION: 2, readSupplierImages: async () => { reads++; throw new Error('private provider response'); } };
+  await load(fx.deps).runFactoryPilot('cron', 'corr');
+  const result = await load(fx.deps).runFactoryPilot('cron', 'corr');
+  assert.equal(reads, 1);
+  assert.equal(result.blocked, 1);
+  assert.ok(!JSON.stringify(result).includes('private provider response'));
+});
 test('supplier selection is deterministic and refuses ambiguous integrations', () => {
   const { selectPilotSupplier } = load({});
   const suppliers = [{ id: 'a', name: 'Other' }, { id: 'b', name: 'Sanchio' }];
@@ -158,3 +192,4 @@ test('studio reference aggregates distinguish missing source assets from fully i
   assert.equal(unavailable.reviewReportsUnavailableImages, true);
   assert.ok(!JSON.stringify(unavailable).includes('PRIVATE'));
 });
+

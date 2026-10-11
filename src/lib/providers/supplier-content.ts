@@ -98,7 +98,7 @@ export function supplierMobileContent(raw: string) {
 export function supplierMeasurements(text: string, source: SupplierFact['source'], sku?: string) {
   const facts: SupplierFact[] = [];
   const names: Record<string, string> = { comprimento: 'lengthCm', length: 'lengthCm', largura: 'widthCm', width: 'widthCm', altura: 'heightCm', height: 'heightCm' };
-  const pattern = /\b(comprimento|length|largura|width|altura|height|peso\s+l[ií]quido|net\s+weight|product\s+weight|peso\s+do\s+produto)\s*[:=]?\s*(\d+(?:[.,]\d+)?)\s*(mm|cm|metros?|m|inches|inch|in|polegadas?|kg|grams?|gramas?|g)\b/gi;
+  const pattern = /\b(comprimento|length|largura|width|altura|height|peso\s+l[ií]quido|net\s+weight|product\s+weight|peso\s+do\s+produto|weight|peso)\s*[:=|]?\s*(\d+(?:[.,]\d+)?)\s*(mm|cm|metros?|m|inches|inch|in|polegadas?|kg|grams?|gramas?|g)\b/gi;
   for (const match of text.matchAll(pattern)) {
     const label = match[1].toLowerCase();
     const value = Number(match[2].replace(',', '.'));

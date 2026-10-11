@@ -1,3 +1,4 @@
+import { aliexpressPageAccess, supplierPageUrl } from './providers/supplier-page-access.ts';
 import { getDatabasePool, readState } from './server-state';
 import { runServerCommand } from './command-runner';
 import { getSupplierAdapterForIntegration } from './integrations';
@@ -5,9 +6,10 @@ import { emptyIntake, type Candidate, type IntakeState } from './intake';
 import { emptyProductFactory, productGaps, type ProductFactoryState } from './product-factory';
 import { emptyMedia, approvedStudioAssets, studioReadiness, type MediaState } from './media-factory';
 import { supplierCandidateInput } from './supplier-product';
-import { readSupplierImages } from './providers/supplier-vision.ts';
+import { readSupplierImages, SUPPLIER_VISION_REVISION } from './providers/supplier-vision.ts';
 import { supplierForImageReading } from './providers/supplier-stored.ts';
 import { parseDsProduct } from './providers/aliexpress.ts';
+import { enrichSupplierPage, SUPPLIER_PAGE_REVISION } from './providers/supplier-page.ts';
 import { generateGatewayText, GatewayError } from './ai-gateway';
 import { parseCommercialCopy } from './factory-production-rules';
 import { archiveSourceAllowed, persistSupplierOriginals } from './supplier-media-archive';
@@ -86,6 +88,46 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
   const db = await getDatabasePool();
   const key = `pilot:aliexpress:${itemId}`;
   const prior = (await db.query('SELECT detail FROM factory_production_runs WHERE candidate_id=$1', [key])).rows[0]?.detail as PilotCheckpoint | undefined;
+  // User paused photo production and requested a complete technical source read instead.
+  // Preserve the failed studio checkpoint and its inspection history without retrying it.
+  if (process.env.DDF_MEDIA_PAUSED === 'true') {
+    const intake = ((await readState('intake'))?.payload ?? emptyIntake) as IntakeState;
+    const candidate = intake.candidates.find(item => candidateMatchesPilot(item, itemId));
+    if (!candidate?.supplier || ['REJEITADO', 'ARQUIVADO'].includes(candidate.status)) return { stage: 'SOURCE', blocked: 1, code: 'pilot_origin_ineligible' };
+    const identity = { role: 'SYSTEM', actor: 'system:factory-pilot:technical-source-read', correlationId };
+    let supplier = supplierForImageReading(candidate)!;
+    if (supplier.technicalReadFailure?.revision === SUPPLIER_VISION_REVISION) return { stage: 'TECHNICAL_DATA', blocked: 1, code: supplier.technicalReadFailure.code, mediaPaused: true };
+    if (process.env.DDF_SUPPLIER_PAGE_ENABLED === 'true' && supplier.pageRead?.revision !== SUPPLIER_PAGE_REVISION) {
+      if (!supplier.rawData) return { stage: 'SOURCE', blocked: 1, code: 'stored_supplier_payload_missing' };
+      const parsed = parseDsProduct({ result: supplier.rawData }, itemId, supplier.currency);
+      await runServerCommand('intake.refreshSupplier', { candidateId: candidate.id, supplier: { ...supplier, pageRead: { revision: SUPPLIER_PAGE_REVISION, status: 'FAILED', at: new Date().toISOString(), actions: [], code: 'supplier_page_interrupted' } } }, identity);
+      const enriched = await enrichSupplierPage(parsed, { itemId: parsed.itemId, url: supplierPageUrl(parsed.itemId), title: parsed.title }, aliexpressPageAccess);
+      supplier = { ...supplier, ...supplierCandidateInput(enriched, supplier.name).supplier,
+        facts: [...(supplier.facts ?? []), ...(enriched.facts ?? [])], visualAttributes: supplier.visualAttributes, vision: supplier.vision };
+      await runServerCommand('intake.refreshSupplier', { candidateId: candidate.id, supplier }, identity);
+    }
+    // Consume a batch before a paid call. A process interruption cannot trigger a blind retry.
+    if (supplier.vision?.revision !== SUPPLIER_VISION_REVISION || !supplier.vision.completed) {
+      await runServerCommand('intake.refreshSupplier', { candidateId: candidate.id, supplier: { ...supplier, technicalReadFailure: { revision: SUPPLIER_VISION_REVISION, code: 'technical_source_read_interrupted' } } }, identity);
+    }
+    let read;
+    try { read = await readSupplierImages(supplier, `candidate:${candidate.id}:technical-source`, generateGatewayText); }
+    catch (error) {
+      const code = pilotErrorCode(error);
+      await runServerCommand('intake.refreshSupplier', { candidateId: candidate.id, supplier: { ...supplier, technicalReadFailure: { revision: SUPPLIER_VISION_REVISION, code } } }, identity);
+      return { stage: 'TECHNICAL_DATA', blocked: 1, code, mediaPaused: true };
+    }
+    delete read.technicalReadFailure;
+    await runServerCommand('intake.refreshSupplier', { candidateId: candidate.id, supplier: read }, identity);
+    const products = ((await readState('products'))?.payload ?? emptyProductFactory) as ProductFactoryState;
+    const product = products.products.find(item => item.candidateId === candidate.id && !item.archivedAt);
+    if (product) await runServerCommand('products.refreshSupplier', { productId: product.id }, identity);
+    const detail = { stage: 'TECHNICAL_DATA', sourceRead: read.vision?.processedImages.length ?? 0, sourceCount: read.images.length,
+      pageReadStatus: read.pageRead?.status ?? 'NOT_ATTEMPTED', pageReadCode: read.pageRead?.code, technicalAttributes: Object.keys(read.specifications ?? {}).length,
+      mediaPaused: true, continuing: read.vision?.completed ? 0 : 1 };
+    console.info('DDF_FACTORY_TECHNICAL_READ', JSON.stringify(detail));
+    return detail;
+  }
   const retryRevision = process.env.DDF_PILOT_RETRY_REVISION?.trim();
   // Operator explicitly acknowledges one technical routing repair. This cannot retry paid image work,
   // budget/access failures, or the same revision twice, even when the attempted repair also fails.
