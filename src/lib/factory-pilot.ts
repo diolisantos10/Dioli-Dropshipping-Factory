@@ -97,6 +97,12 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
     const identity = { role: 'SYSTEM', actor: 'system:factory-pilot:technical-source-read', correlationId };
     let supplier = supplierForImageReading(candidate)!;
     if (supplier.technicalReadFailure?.revision === SUPPLIER_VISION_REVISION) return { stage: 'TECHNICAL_DATA', blocked: 1, code: supplier.technicalReadFailure.code, mediaPaused: true };
+    if (supplier.vision?.revision === SUPPLIER_VISION_REVISION && supplier.vision.completed
+      && (process.env.DDF_SUPPLIER_PAGE_ENABLED !== 'true' || supplier.pageRead?.revision === SUPPLIER_PAGE_REVISION)) {
+      return { stage: 'TECHNICAL_DATA', sourceRead: supplier.vision.processedImages.length, sourceCount: supplier.images.length,
+        pageReadStatus: supplier.pageRead?.status ?? 'NOT_ATTEMPTED', pageReadCode: supplier.pageRead?.code,
+        technicalAttributes: Object.keys(supplier.specifications ?? {}).length, mediaPaused: true, continuing: 0 };
+    }
     if (process.env.DDF_SUPPLIER_PAGE_ENABLED === 'true' && supplier.pageRead?.revision !== SUPPLIER_PAGE_REVISION) {
       if (!supplier.rawData) return { stage: 'SOURCE', blocked: 1, code: 'stored_supplier_payload_missing' };
       const parsed = parseDsProduct({ result: supplier.rawData }, itemId, supplier.currency);
