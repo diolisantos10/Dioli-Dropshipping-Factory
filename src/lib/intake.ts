@@ -13,7 +13,7 @@ export type SupplierDetails = {
   vision?: { revision: number; processedImages: string[]; completed: boolean };
   visualAttributes?: { key: string; value: string; quote: string; imageUrl: string; sku?: string }[];
   technicalReadFailure?: { revision: number; code: string };
-  pageRead?: { revision: number; status: 'COMPLETE' | 'BLOCKED' | 'FAILED'; at: string; actions: string[]; code?: string; documents?: string[] };
+  pageRead?: { revision: number; status: 'COMPLETE' | 'BLOCKED' | 'FAILED'; at: string; actions: string[]; code?: string; documents?: string[]; sourceUrl?: string };
 };
 // Structured supplier data captured on import; older candidates only carry it inside `notes`.
 export type CandidateSupplier = SupplierDetails & { name: string; ref: string; cost: number | null; currency: string; stock: number | null; imageUrl: string; images: string[]; variants: CandidateVariant[] };

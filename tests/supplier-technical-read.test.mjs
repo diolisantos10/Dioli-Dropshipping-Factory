@@ -4,6 +4,20 @@ import { supplierTechnicalAttributes } from '../src/lib/providers/supplier-attri
 import { supplierMeasurements } from '../src/lib/providers/supplier-content.ts';
 import { readSupplierImages } from '../src/lib/providers/supplier-vision.ts';
 import { supplierPageUrl, parsePageDecision } from '../src/lib/providers/supplier-page.ts';
+import { executeCommand, emptyStates } from '../src/lib/commands.ts';
+
+test('audited commands preserve technical evidence and failure checkpoints', () => {
+  const imageUrl = 'https://ae01.alicdn.com/spec.jpg';
+  const supplier = { name: 'AliExpress', ref: '1005013226256365', cost: 1, currency: 'BRL', stock: 1, imageUrl, images: [imageUrl], variants: [], visualAttributes: [{ key: 'Modelo', value: 'SE69170', quote: 'Model SE69170', imageUrl }], technicalReadFailure: { revision: 2, code: 'technical_source_read_interrupted' }, pageRead: { revision: 2, status: 'FAILED', at: '2026-10-11T18:00:00Z', actions: [], code: 'supplier_page_interrupted', documents: ['Model SE69170'] } };
+  const states = structuredClone(emptyStates);
+  const context = { role: 'ADMIN', actor: 'test', at: '2026-10-11T18:00:00Z', newId: () => 'pilot' };
+  states.intake = executeCommand('intake.addCandidate', states, { name: 'Pilot', url: 'https://pt.aliexpress.com/item/1005013226256365.html', notes: '', supplier }, context).payload;
+  const saved = executeCommand('intake.refreshSupplier', states, { candidateId: 'pilot', supplier }, context).payload.candidates[0].supplier;
+  assert.deepEqual(saved.visualAttributes, supplier.visualAttributes);
+  assert.deepEqual(saved.technicalReadFailure, supplier.technicalReadFailure);
+  assert.deepEqual(saved.pageRead, supplier.pageRead);
+  assert.throws(() => executeCommand('intake.refreshSupplier', states, { candidateId: 'pilot', supplier: { ...supplier, visualAttributes: [{ ...supplier.visualAttributes[0], imageUrl: 'https://other.example/invented.jpg' }] } }, context), /Origem/);
+});
 
 test('SE69170 component dimensions never become whole-product or package dimensions', () => {
   const text = 'Lens width: 57 mm\nLens height: 32 mm\nBridge width: 17 mm\nTemple length: 146 mm\nWeight: 22.6 g\nPackage weight: 100 g';

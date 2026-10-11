@@ -138,8 +138,28 @@ function supplierInput(input: Input): CandidateSupplier | undefined {
     rawData: raw.rawData && typeof raw.rawData === 'object' && !Array.isArray(raw.rawData) ? structuredClone(raw.rawData) as Record<string, unknown> : undefined,
     importRevision: typeof raw.importRevision === 'number' && Number.isInteger(raw.importRevision) && raw.importRevision >= 1 ? raw.importRevision : undefined,
     facts: supplierFacts(raw.facts), imageLabels: strings(raw, 'imageLabels', 1000),
+    ...(raw.visualAttributes ? { visualAttributes: supplierVisualAttributes(raw.visualAttributes, images, variants.map(item => item.sku)) } : {}),
+    ...(raw.technicalReadFailure ? { technicalReadFailure: { revision: num(obj(raw, 'technicalReadFailure'), 'revision'), code: technicalCode(obj(raw, 'technicalReadFailure')) } } : {}),
+    ...(raw.pageRead ? { pageRead: { revision: num(obj(raw, 'pageRead'), 'revision'), status: oneOf(obj(raw, 'pageRead'), 'status', ['COMPLETE', 'BLOCKED', 'FAILED'] as const), at: str(obj(raw, 'pageRead'), 'at', 80), actions: strings(obj(raw, 'pageRead'), 'actions', 100), documents: strings(obj(raw, 'pageRead'), 'documents', 100), ...(obj(raw, 'pageRead').sourceUrl ? { sourceUrl: httpsOrEmpty(obj(raw, 'pageRead').sourceUrl) } : {}), ...(obj(raw, 'pageRead').code ? { code: technicalCode(obj(raw, 'pageRead')) } : {}) } } : {}),
     ...(raw.vision ? { vision: { revision: num(obj(raw, 'vision'), 'revision'), processedImages: strings(obj(raw, 'vision'), 'processedImages', 1000), completed: obj(raw, 'vision').completed === true } } : {}),
   };
+}
+
+function technicalCode(raw: Input) {
+  const code = str(raw, 'code', 100);
+  if (!/^[a-z0-9_]+$/.test(code)) throw new CommandError('Código técnico inválido.');
+  return code;
+}
+function supplierVisualAttributes(value: unknown, images: string[], skus: string[]) {
+  if (!Array.isArray(value) || value.length > 1000) throw new CommandError('Atributos técnicos inválidos.');
+  return value.map(item => {
+    if (!item || typeof item !== 'object') throw new CommandError('Atributo técnico inválido.');
+    const raw = item as Input;
+    const imageUrl = httpsOrEmpty(raw.imageUrl);
+    const sku = raw.sku ? str(raw, 'sku', 120) : undefined;
+    if (!images.includes(imageUrl) || sku && !skus.includes(sku)) throw new CommandError('Origem do atributo técnico inválida.');
+    return { key: str(raw, 'key', 120), value: str(raw, 'value', 500), quote: str(raw, 'quote', 1000), imageUrl, ...(sku ? { sku } : {}) };
+  });
 }
 
 function supplierFacts(value: unknown): SupplierFact[] {
@@ -365,3 +385,4 @@ export function executeCommand(type: string, states: CommandStates, input: Input
     throw new CommandError(error instanceof Error ? error.message : 'Operação indisponível.', 422);
   }
 }
+

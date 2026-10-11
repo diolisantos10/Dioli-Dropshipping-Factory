@@ -31,7 +31,9 @@ export async function inspectSupplierPage(page: Page, target: SupplierPageTarget
   const texts = new Set<string>(), images = new Set<string>(), actions: string[] = [];
   const visited = new Set<string>();
   const observations = new Set<string>();
+  const deadline = Date.now() + 180_000;
   for (let step = 0; step < 18; step++) {
+    if (Date.now() > deadline - 10_000) throw new Error('supplier_page_exploration_limit');
     if (!targetSupplierPage(page.url(), target, access)) throw new Error('supplier_page_redirected');
     if (/verify you are human|slide to verify|captcha|access denied|sign in to continue/i.test(await page.locator('body').innerText())) throw new Error('supplier_page_access_blocked');
     const observation: Observation = await page.evaluate(({ itemId, productPathPattern }) => {
@@ -62,7 +64,7 @@ export async function inspectSupplierPage(page: Page, target: SupplierPageTarget
     const decision = parsePageDecision(result.text, observation);
     for (const id of decision.relevantBlockIds) {
       const block = observation.blocks.find(item => item.id === id)!;
-      texts.add(block.text); for (const image of block.images) images.add(image);
+      texts.add(block.text); for (const image of block.images) if (allowedSupplierResource(image, access)) images.add(image);
     }
     if (decision.action === 'finish') return { description: [...texts].join('\n'), images: [...images], specifications: supplierTechnicalAttributes([...texts].join('\n')), actions };
     if (decision.action === 'blocked') throw new Error('supplier_page_exploration_blocked');
@@ -94,7 +96,7 @@ export async function enrichSupplierPage(product: SupplierProduct, target: Suppl
     const specifications = { ...content.specifications, ...product.specifications };
     return { ...product, description: [...new Set([product.description, content.description].filter(Boolean))].join('\n\n'), images: [...new Set([...(product.images ?? []), ...content.images])], specifications,
       materials: [...new Set([...(product.materials ?? []), ...Object.entries(specifications).filter(([key]) => /material/i.test(key)).map(([, value]) => value)])], facts: [...(product.facts ?? []), ...measurements.facts],
-      pageRead: { revision: SUPPLIER_PAGE_REVISION, status: 'COMPLETE', at: new Date().toISOString(), actions: content.actions, documents: [content.description] } };
+      pageRead: { revision: SUPPLIER_PAGE_REVISION, status: 'COMPLETE', at: new Date().toISOString(), actions: content.actions, sourceUrl: target.url, documents: content.description.match(/[\s\S]{1,2000}/g) ?? [] } };
   } catch (error) {
     const code = error instanceof Error && /^supplier_page_[a-z_]+$/.test(error.message) ? error.message : 'supplier_page_execution_failed';
     return { ...product, pageRead: { revision: SUPPLIER_PAGE_REVISION, status: 'BLOCKED', at: new Date().toISOString(), actions: [], code } };
