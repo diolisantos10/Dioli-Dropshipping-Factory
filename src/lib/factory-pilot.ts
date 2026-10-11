@@ -41,6 +41,10 @@ export function pilotStudioReferenceSummary(media: MediaState, productId: string
     assessmentProcessedCount: new Set(request?.sourceAssessment?.processedSourceAssetIds ?? []).size,
     assessmentSupportedCount: new Set(request?.sourceAssessment?.supportedSourceAssetIds ?? []).size,
     assessmentHasVariant: !!request?.sourceAssessment?.variantIdentity?.trim(),
+    reviewMentionsFrontal: /frontal|front[- ]?(?:view|facing)|vista de frente/i.test(evidence),
+    reviewMentionsNoVisualEvidence: /sem evid[eê]ncia|n[aã]o (?:h[aá]|existe|mostra|comprova|apresenta)|nenhuma imagem|no (?:image|photo|evidence)|not (?:show|visible)|cannot (?:confirm|verify)/i.test(evidence),
+    reviewMentionsQuality: /baixa (?:qualidade|resolu[cç][aã]o)|desfoc|ileg[ií]vel|blur|low[- ]resolution|unclear/i.test(evidence),
+    reviewMentionsVariantConflict: /variantes? (?:diferentes|distintas)|cores? diferentes|different variants?|mismatch|mixed variants?/i.test(evidence),
     reviewReportsUnavailableImages: /imagens? (?:não (?:foram (?:fornecidas|carregadas)|est(?:á|ão) dispon[ií]ve)|indispon[ií]ve)|não (?:consigo|pude|posso) (?:visualizar|acessar|ver) (?:as )?imagens|images? (?:are |were )?(?:unavailable|inaccessible|not (?:provided|loaded))|(?:cannot|unable to) (?:see|view|access) (?:the )?images/i.test(evidence) };
 }
 export function selectPilotSupplier(connections: Connection[], preferred?: string) {

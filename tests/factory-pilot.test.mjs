@@ -151,7 +151,7 @@ test('studio reference aggregates distinguish missing source assets from fully i
     { id: 'c', productId: 'other', kind: 'ORIGINAL', status: 'APROVADA', url: 'https://ae01.alicdn.com/c.jpg' },
   ], productionRequests: [{ productId: 'pilot', sourceAssetIds: ['a', 'b', 'missing'], sourceAssessment: { processedSourceAssetIds: ['a', 'b', 'missing'], supportedSourceAssetIds: [], variantIdentity: 'PRIVATE VARIANT' } }] };
   const result = pilot.pilotStudioReferenceSummary(media, 'pilot');
-  assert.deepEqual(result, { requestReferenceCount: 3, availableApprovedCount: 2, sourceMimeCounts: { jpeg: 0, png: 0, webp: 0, avif: 0, other: 2 }, allowedReferenceCount: 1, assessmentProcessedCount: 3, assessmentSupportedCount: 0, assessmentHasVariant: true, reviewReportsUnavailableImages: false });
+  assert.deepEqual(result, { requestReferenceCount: 3, availableApprovedCount: 2, sourceMimeCounts: { jpeg: 0, png: 0, webp: 0, avif: 0, other: 2 }, allowedReferenceCount: 1, assessmentProcessedCount: 3, assessmentSupportedCount: 0, assessmentHasVariant: true, reviewMentionsFrontal: false, reviewMentionsNoVisualEvidence: false, reviewMentionsQuality: false, reviewMentionsVariantConflict: false, reviewReportsUnavailableImages: false });
   assert.ok(!JSON.stringify(result).includes('PRIVATE'));
   media.productionRequests[0].sourceAssessment.evidence = ['Não consigo visualizar as imagens PRIVATE PROVIDER EVIDENCE'];
   const unavailable = pilot.pilotStudioReferenceSummary(media, 'pilot');
