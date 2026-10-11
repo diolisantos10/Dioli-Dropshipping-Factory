@@ -52,6 +52,9 @@ test('media pause reads only pilot technical data and preserves failed studio hi
   assert.deepEqual(prior, snapshot);
   assert.equal(fx.saved, undefined);
   assert.equal(candidate.supplier.technicalReadFailure, undefined);
+  const calls = fx.calls;
+  await load(fx.deps).runFactoryPilot('cron', 'corr');
+  assert.equal(fx.calls, calls);
 });
 test('technical failure blocks another paid call while photos are paused', async t => {
   const previous = process.env.DDF_MEDIA_PAUSED;
