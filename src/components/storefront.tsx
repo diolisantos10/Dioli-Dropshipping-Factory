@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { categoriesOf, filterCards, NO_AVAILABILITY, NO_CATEGORY, runCardBulk, suppliersOf, type StoreCard, type StoreFilters } from '@/lib/storefront';
+import { VariantDetails } from '@/components/variant-details';
 import { availabilityLabels } from '@/lib/product-fiscal';
 
 export type BulkAction = { status: string; label: string; tone?: 'primary' | 'secondary' | 'danger' };
@@ -171,16 +172,7 @@ function ProductDetail({ card, onClose, children }: { card: StoreCard; onClose: 
           {card.url && <a className="inline-block break-all text-sm underline" href={card.url} target="_blank" rel="noreferrer noopener">Abrir página de origem</a>}
           <section><h3 className="font-semibold">Descrição do produto</h3><p className="mt-2 whitespace-pre-wrap text-sm text-[var(--muted)]">{card.description || 'Não informada pelo fornecedor.'}</p></section>
           {card.sourceDetails && <SupplierInformation supplier={card.sourceDetails} />}
-          <section>
-            <h3 className="font-semibold">Variantes ({card.variants.length})</h3>
-            {card.variants.length ? <ul className="mt-2 divide-y divide-[var(--line)] rounded-lg border border-[var(--line)]">
-              {card.variants.map(variant => <li key={variant.id} className="flex items-center gap-3 p-2 text-sm">
-                {variant.imageUrl ? <img src={variant.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-10 w-10 flex-none rounded object-cover" /> : null}
-                <div className="min-w-0 flex-1"><p className="font-medium">{variant.label}</p><p className="truncate text-xs text-[var(--muted)]">{variant.detail}</p></div>
-                <div className="text-right text-xs"><p>{formatMoney(variant.price, card.currency)}</p><p className="text-[var(--muted)]">{variant.stock === null ? '' : `${variant.stock} un.`}</p></div>
-              </li>)}
-            </ul> : <p className="mt-2 text-sm text-[var(--muted)]">Nenhuma variante registrada.</p>}
-          </section>
+          <VariantDetails variants={card.variants} currency={card.currency} />
         </div>
       </div>
       {children && <div className="border-t border-[var(--line)] p-4 sm:p-6">{children}</div>}
@@ -195,7 +187,7 @@ function Info({ label, value }: { label: string; value: string }) {
 function SupplierInformation({ supplier }: { supplier: NonNullable<StoreCard['sourceDetails']> }) {
   const missing = 'Ainda não confirmado';
   const sourceNames = { title: 'Título', description: 'Descrição', specification: 'Ficha técnica', variant: 'Variação', image: 'Foto' };
-  const facts = [...new Map([...(supplier.facts ?? []), ...supplier.variants.flatMap(variant => variant.facts ?? [])].map(fact => [JSON.stringify(fact), fact])).values()];
+  const facts = [...new Map([...(supplier.facts ?? []), ...(supplier.variants ?? []).flatMap(variant => variant.facts ?? [])].map(fact => [JSON.stringify(fact), fact])).values()];
   const conflicting = new Map<string, Set<number>>();
   for (const fact of facts) {
     const key = `${fact.sku ?? ''}:${fact.field}`;
@@ -206,7 +198,7 @@ function SupplierInformation({ supplier }: { supplier: NonNullable<StoreCard['so
     ? [value.lengthCm, value.widthCm, value.heightCm].map(item => item === undefined ? '?' : item.toLocaleString('pt-BR')).join(' × ') + ' cm (C × L × A)' : missing;
   return <section className="space-y-3">
     <h3 className="font-semibold">Dados brutos do fornecedor</h3>
-    <p className="text-sm text-[var(--muted)]">{supplier.vision?.completed ? 'Leitura das fotos concluída.' : supplier.images.length ? `Leitura das fotos pendente: ${supplier.vision?.processedImages.length ?? 0} de ${supplier.images.length} analisadas.` : 'Nenhuma foto disponível para leitura.'} Campos sem confirmação permanecem em aberto.</p>
+    <p className="text-sm text-[var(--muted)]">{supplier.vision?.completed ? 'Leitura das fotos concluída.' : (supplier.images?.length ?? 0) ? `Leitura das fotos pendente: ${supplier.vision?.processedImages?.length ?? 0} de ${supplier.images?.length ?? 0} analisadas.` : 'Nenhuma foto disponível para leitura.'} Campos sem confirmação permanecem em aberto.</p>
     {conflicts && <p className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">Há medidas conflitantes nas fontes. Confira as evidências antes de concluir o cadastro.</p>}
     <dl className="grid grid-cols-2 gap-3 text-sm">
       <Info label="Dimensões do produto" value={dimensions(supplier.dimensions)} />
@@ -221,7 +213,7 @@ function SupplierInformation({ supplier }: { supplier: NonNullable<StoreCard['so
       <Info label="Avaliação" value={supplier.rating === undefined ? missing : String(supplier.rating)} />
       <Info label="Número de avaliações" value={supplier.reviewCount === undefined ? missing : supplier.reviewCount.toLocaleString('pt-BR')} />
     </dl>
-    {supplier.variants.length > 0 && <details className="text-sm"><summary className="cursor-pointer font-semibold">Medidas por variação ({supplier.variants.length})</summary><div className="mt-2 overflow-x-auto"><table className="w-full text-left"><thead><tr><th className="p-2">Variação / SKU</th><th className="p-2">Dimensões do produto</th><th className="p-2">Peso do produto</th></tr></thead><tbody>{supplier.variants.map(variant => <tr key={variant.sku}><td className="p-2">{variant.label}<br /><span className="text-xs text-[var(--muted)]">{variant.sku}</span></td><td className="p-2">{dimensions(variant.dimensions)}</td><td className="p-2">{variant.weightGrams === undefined ? missing : `${variant.weightGrams.toLocaleString('pt-BR')} g`}</td></tr>)}</tbody></table></div></details>}
+    {(supplier.variants?.length ?? 0) > 0 && <details className="text-sm"><summary className="cursor-pointer font-semibold">Medidas por variação ({supplier.variants.length})</summary><div className="mt-2 overflow-x-auto"><table className="w-full text-left"><thead><tr><th className="p-2">Variação / SKU</th><th className="p-2">Dimensões do produto</th><th className="p-2">Peso do produto</th></tr></thead><tbody>{supplier.variants.map(variant => <tr key={variant.sku}><td className="p-2">{variant.label}<br /><span className="text-xs text-[var(--muted)]">{variant.sku}</span></td><td className="p-2">{dimensions(variant.dimensions)}</td><td className="p-2">{variant.weightGrams === undefined ? missing : `${variant.weightGrams.toLocaleString('pt-BR')} g`}</td></tr>)}</tbody></table></div></details>}
     {facts.length > 0 && <details className="text-sm"><summary className="cursor-pointer font-semibold">Evidências das medidas ({facts.length})</summary><ul className="mt-2 max-h-80 space-y-2 overflow-y-auto">{facts.map((fact, index) => <li key={index} className="rounded border border-[var(--line)] p-2"><p className="text-xs text-[var(--muted)]">{sourceNames[fact.source]}{fact.sku ? ` · SKU ${fact.sku}` : ' · sem SKU específico'}</p><p className="whitespace-pre-wrap">{fact.excerpt}</p><p>{fact.value.toLocaleString('pt-BR')} {fact.unit}</p>{fact.imageUrl && <a className="underline" href={fact.imageUrl} target="_blank" rel="noopener noreferrer">Abrir foto de origem</a>}</li>)}</ul></details>}
     <h4 className="text-sm font-semibold">Especificações técnicas originais</h4>
     {Object.keys(supplier.specifications ?? {}).length ? <dl className="grid gap-2 sm:grid-cols-2">{Object.entries(supplier.specifications ?? {}).map(([key, value]) => <Info key={key} label={key} value={value} />)}</dl> : <p className="text-sm text-[var(--muted)]">{missing}</p>}

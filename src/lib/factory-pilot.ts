@@ -11,6 +11,7 @@ import { resolveVisualAttributes } from './providers/supplier-attributes.ts';
 import { supplierForImageReading } from './providers/supplier-stored.ts';
 import { parseDsProduct } from './providers/aliexpress.ts';
 import { enrichSupplierPage, SUPPLIER_PAGE_REVISION } from './providers/supplier-page.ts';
+import { repairStoredVariantSchemas } from './stored-variant-repair.ts';
 import { generateGatewayText, GatewayError } from './ai-gateway';
 import { parseCommercialCopy } from './factory-production-rules';
 import { archiveSourceAllowed, persistSupplierOriginals } from './supplier-media-archive';
@@ -102,6 +103,10 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
   // Preserve the failed studio checkpoint and its inspection history without retrying it.
   if (process.env.DDF_MEDIA_PAUSED === 'true') {
     const intake = ((await readState('intake'))?.payload ?? emptyIntake) as IntakeState;
+    const storedProducts = ((await readState('products'))?.payload ?? emptyProductFactory) as ProductFactoryState;
+    const repair = await repairStoredVariantSchemas(intake, storedProducts, productId => runServerCommand('products.refreshSupplier', { productId },
+      { role: 'SYSTEM', actor: 'system:stored-variant-repair', correlationId }));
+    console.info('DDF_STORED_VARIANT_REPAIR', JSON.stringify(repair));
     const candidate = intake.candidates.find(item => candidateMatchesPilot(item, itemId));
     if (!candidate?.supplier || ['REJEITADO', 'ARQUIVADO'].includes(candidate.status)) return { stage: 'SOURCE', blocked: 1, code: 'pilot_origin_ineligible' };
     const identity = { role: 'SYSTEM', actor: 'system:factory-pilot:technical-source-read', correlationId };

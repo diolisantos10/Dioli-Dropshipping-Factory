@@ -83,7 +83,9 @@ export function refreshProductSupplier(state: ProductFactoryState, id: string, c
   const bySku = new Map(source.variants.map(variant => [variant.sku, variant]));
   spec.variants = spec.variants.map(variant => {
     const incomingVariant = bySku.get(variant.sku);
-    return incomingVariant ? { ...variant, dimensions: fillDimensions(variant.dimensions, incomingVariant.dimensions), weightGrams: variant.weightGrams ?? incomingVariant.weightGrams } : variant;
+    return incomingVariant ? { ...variant, title: variant.title || incomingVariant.title,
+      attributes: { ...incomingVariant.attributes, ...variant.attributes },
+      dimensions: fillDimensions(variant.dimensions, incomingVariant.dimensions), weightGrams: variant.weightGrams ?? incomingVariant.weightGrams } : variant;
   });
   const existingSkus = new Set(spec.variants.map(variant => variant.sku));
   const existingIds = new Set(spec.variants.map(variant => variant.id));

@@ -31,6 +31,7 @@ function fixture(t, { candidate, prior } = {}) {
     './ai-gateway': { GatewayError: class extends Error {}, generateGatewayText: async () => { throw new Error('Unexpected paid call'); } },
     './providers/supplier-stored.ts': { supplierForImageReading: value => value.supplier },
     './providers/supplier-attributes.ts': { resolveVisualAttributes: value => value.specifications ?? {} },
+    './stored-variant-repair.ts': { repairStoredVariantSchemas: async () => ({ repaired: 0 }) },
   };
   return { deps, get saved() { return saved; }, get calls() { return calls; } };
 }

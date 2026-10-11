@@ -7,7 +7,7 @@ import type { PriceCalculation } from './pricing.ts';
 import { fiscalCompletion, type Availability } from './product-fiscal.ts';
 import { isEyewearProduct, normalizeProductText, productMissingTechnical } from './product-filters.ts';
 
-export type CardVariant = { id: string; label: string; detail: string; price: number | null; stock: number | null; imageUrl: string };
+export type CardVariant = { id: string; label: string; detail: string; price: number | null; stock: number | null; imageUrl: string; attributes?: Record<string, string>; sku?: string; gtin?: string; weightGrams?: number | null; dimensions?: { lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null } };
 export type StoreCard = {
   id: string; title: string; fullTitle: string; imageUrl: string; images: string[];
   cost: number | null; currency: string; suggestedPrice: number | null; priceCurrency: string;
@@ -56,7 +56,7 @@ export function candidateCard(candidate: Candidate): StoreCard {
   const legacy = parseLegacyNotes(candidate.notes);
   const supplier = candidate.supplier;
   const images = [...new Set([supplier?.imageUrl, ...(supplier?.images ?? []), legacy.imageUrl].filter((item): item is string => !!item))];
-  const variants = (supplier?.variants ?? []).map((item, index) => ({ id: item.sku || String(index), label: item.label, detail: [`SKU ${item.sku}`, ...Object.entries(item.attributes ?? {}).map(([key, value]) => `${key}: ${value}`)].join(' · '), price: item.price, stock: item.stock, imageUrl: item.imageUrl ?? '' }));
+  const variants = (supplier?.variants ?? []).map((item, index) => ({ id: item.sku || String(index), label: item.label, detail: [`SKU ${item.sku}`, ...Object.entries(item.attributes ?? {}).map(([key, value]) => `${key}: ${value}`)].join(' · '), price: item.price, stock: item.stock, imageUrl: item.imageUrl ?? '', sku: item.sku, attributes: item.attributes, dimensions: item.dimensions, weightGrams: item.weightGrams }));
   const fullTitle = candidate.fullName || candidate.name;
   const card: Omit<StoreCard, 'searchText'> = {
     id: candidate.id, title: candidate.name, fullTitle, imageUrl: images[0] ?? '', images,
@@ -90,7 +90,7 @@ export function productCard(record: CatalogRecord, candidate?: Candidate, curati
   const variants = (product.spec?.variants ?? []).map(item => ({
     id: item.id, label: item.title || item.sku,
     detail: [`SKU ${item.sku}`, item.gtin && `GTIN ${item.gtin}`, ...Object.entries(item.attributes).map(([key, value]) => `${key}: ${value}`)].filter(Boolean).join(' · '),
-    price: null, stock: null, imageUrl: '',
+    price: null, stock: null, imageUrl: '', sku: item.sku, gtin: item.gtin, attributes: item.attributes, dimensions: item.dimensions, weightGrams: item.weightGrams,
   }));
   const state = curation ?? 'PRONTO';
   const card: Omit<StoreCard, 'searchText'> = {

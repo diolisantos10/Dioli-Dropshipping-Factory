@@ -26,6 +26,7 @@ jobs:
       - run: npm run db:verify
       - run: npm run check
       - run: npm run test:e2e
+      - run: docker run --rm --entrypoint node ddf-supplier-browser scripts/test-variant-interface.mjs
       - run: npm audit --omit=dev --audit-level=high
       - name: Preserve preview-ready build
         if: github.event_name == 'pull_request'

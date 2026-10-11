@@ -86,3 +86,15 @@ test('ficha bruta separa descrição do fornecedor das observações e mantém d
   assert.equal(card.sourceDetails.specifications.Material, 'Acetato');
   assert.equal(card.sourceDetails.rawData.custom, 'preservado');
 });
+
+
+test('every shelf exposes full variant attributes and measurements without flattening or inventing', () => {
+  const source = { ...supplier(5), variants: [{ sku: 'sku-one', label: 'Preto', price: 5, stock: null, attributes: { Cor: 'Preto', Material: 'PC' }, dimensions: { widthCm: 14 }, weightGrams: 22.6 }] };
+  const raw = candidateCard(candidate('variant', { supplier: source }));
+  assert.deepEqual(raw.variants[0].attributes, source.variants[0].attributes);
+  assert.equal(raw.variants[0].sku, 'sku-one');
+  assert.equal(raw.variants[0].weightGrams, 22.6);
+  assert.equal(raw.variants[0].dimensions.lengthCm, undefined);
+  const legacy = candidateCard(candidate('legacy'));
+  assert.equal(legacy.variants.length, 0);
+});
