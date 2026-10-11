@@ -30,6 +30,7 @@ function fixture(t, { candidate, prior } = {}) {
     './product-factory': { emptyProductFactory: { products: [], events: [] } }, './intake': { emptyIntake: { candidates: [] } },
     './ai-gateway': { GatewayError: class extends Error {}, generateGatewayText: async () => { throw new Error('Unexpected paid call'); } },
     './providers/supplier-stored.ts': { supplierForImageReading: value => value.supplier },
+    './providers/supplier-attributes.ts': { resolveVisualAttributes: value => value.specifications ?? {} },
   };
   return { deps, get saved() { return saved; }, get calls() { return calls; } };
 }

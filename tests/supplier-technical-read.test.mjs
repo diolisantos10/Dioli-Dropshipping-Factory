@@ -1,10 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { supplierTechnicalAttributes } from '../src/lib/providers/supplier-attributes.ts';
+import { supplierTechnicalAttributes, resolveVisualAttributes } from '../src/lib/providers/supplier-attributes.ts';
 import { supplierMeasurements } from '../src/lib/providers/supplier-content.ts';
 import { readSupplierImages } from '../src/lib/providers/supplier-vision.ts';
 import { supplierPageUrl, parsePageDecision } from '../src/lib/providers/supplier-page.ts';
 import { executeCommand, emptyStates } from '../src/lib/commands.ts';
+
+test('later contradictory OCR does not leave the earlier selected attribute resolved', () => {
+  const visualAttributes = [{ key: 'Material da armação', value: 'PC', quote: 'Frame PC', imageUrl: 'https://ae01.alicdn.com/a.jpg' }, { key: 'Material da armação', value: 'metal', quote: 'Frame metal', imageUrl: 'https://ae01.alicdn.com/b.jpg' }];
+  assert.equal(resolveVisualAttributes({ visualAttributes, specifications: { 'Material da armação': 'PC' } })['Material da armação'], undefined);
+  assert.equal(visualAttributes.length, 2);
+  // An independent original declaration is preserved, not replaced by either OCR result.
+  assert.equal(resolveVisualAttributes({ visualAttributes, specifications: { 'Material da armação': 'Original declaration' } })['Material da armação'], 'Original declaration');
+});
 
 test('audited commands preserve technical evidence and failure checkpoints', () => {
   const imageUrl = 'https://ae01.alicdn.com/spec.jpg';

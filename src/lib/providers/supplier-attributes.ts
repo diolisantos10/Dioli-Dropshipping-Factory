@@ -38,6 +38,11 @@ export function resolveVisualAttributes(supplier: SupplierDetails) {
     if (item.sku) continue;
     const values = groups.get(item.key) ?? new Set<string>(); values.add(item.value); groups.set(item.key, values);
   }
-  for (const [key, values] of groups) if (values.size === 1 && !specifications[key]) specifications[key] = [...values][0];
+  for (const [key, values] of groups) {
+    if (values.size === 1 && !specifications[key]) specifications[key] = [...values][0];
+    // A later batch can contradict an attribute selected by an earlier batch.
+    // Remove that selection; keep every assertion and quote in visualAttributes.
+    else if (values.size > 1 && values.has(specifications[key])) delete specifications[key];
+  }
   return specifications;
 }

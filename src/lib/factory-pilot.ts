@@ -7,6 +7,7 @@ import { emptyProductFactory, productGaps, type ProductFactoryState } from './pr
 import { emptyMedia, approvedStudioAssets, studioReadiness, type MediaState } from './media-factory';
 import { supplierCandidateInput } from './supplier-product';
 import { readSupplierImages, SUPPLIER_VISION_REVISION } from './providers/supplier-vision.ts';
+import { resolveVisualAttributes } from './providers/supplier-attributes.ts';
 import { supplierForImageReading } from './providers/supplier-stored.ts';
 import { parseDsProduct } from './providers/aliexpress.ts';
 import { enrichSupplierPage, SUPPLIER_PAGE_REVISION } from './providers/supplier-page.ts';
@@ -97,6 +98,12 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
     const identity = { role: 'SYSTEM', actor: 'system:factory-pilot:technical-source-read', correlationId };
     let supplier = supplierForImageReading(candidate)!;
     if (supplier.technicalReadFailure?.revision === SUPPLIER_VISION_REVISION) return { stage: 'TECHNICAL_DATA', blocked: 1, code: supplier.technicalReadFailure.code, mediaPaused: true };
+    const reconciled = { ...supplier, specifications: resolveVisualAttributes(supplier), variants: supplier.variants.map(variant => ({ ...variant,
+      attributes: resolveVisualAttributes({ specifications: variant.attributes, visualAttributes: (supplier.visualAttributes ?? []).filter(item => item.sku === variant.sku).map(item => ({ ...item, sku: undefined })) }) })) };
+    if (JSON.stringify(reconciled.specifications) !== JSON.stringify(supplier.specifications) || JSON.stringify(reconciled.variants) !== JSON.stringify(supplier.variants)) {
+      await runServerCommand('intake.refreshSupplier', { candidateId: candidate.id, supplier: reconciled }, identity);
+      supplier = reconciled;
+    }
     if (supplier.vision?.revision === SUPPLIER_VISION_REVISION && supplier.vision.completed
       && (process.env.DDF_SUPPLIER_PAGE_ENABLED !== 'true' || supplier.pageRead?.revision === SUPPLIER_PAGE_REVISION)) {
       return { stage: 'TECHNICAL_DATA', sourceRead: supplier.vision.processedImages.length, sourceCount: supplier.images.length,
