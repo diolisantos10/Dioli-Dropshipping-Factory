@@ -91,6 +91,23 @@ export function pilotErrorCode(error: unknown) {
   return /IllegalRefreshToken|Refresh token.*ausente/i.test(text) ? 'supplier_reconnect_required' : 'pilot_step_failed';
 }
 
+// Admission is deterministic and audited. A failed paid source read must not hide an
+// explicitly authorized pilot from the factory or require another AI call to admit it.
+async function admitPilotProduct(candidate: Candidate, correlationId: string) {
+  const products = ((await readState('products'))?.payload ?? emptyProductFactory) as ProductFactoryState;
+  const existing = products.products.find(item => item.candidateId === candidate.id);
+  if (existing) return existing.archivedAt ? undefined : existing;
+  if (!candidate.supplier || !['CANDIDATO', 'TRIADO', 'APROVADO'].includes(candidate.status)) return undefined;
+  const identity = { role: 'APPROVER', actor: 'system:factory-pilot:user-authorized', correlationId };
+  for (const status of candidate.status === 'CANDIDATO' ? ['TRIADO', 'APROVADO'] : candidate.status === 'TRIADO' ? ['APROVADO'] : []) {
+    await runServerCommand('intake.transition', { candidateId: candidate.id, status,
+      reason: 'Entrada na fábrica deste único piloto autorizada explicitamente pelo usuário; leitura técnica ainda pendente.' }, identity);
+  }
+  await runServerCommand('products.start', { candidateId: candidate.id }, identity);
+  const stored = ((await readState('products'))?.payload ?? emptyProductFactory) as ProductFactoryState;
+  return stored.products.find(item => item.candidateId === candidate.id && !item.archivedAt);
+}
+
 /** User-authorized single-item pilot. Uses existing authenticated supplier adapter and audited commands.
  * No page scraping, data export, Shopify write or automatic retry of failed paid work. */
 export async function runFactoryPilot(_actor: string, correlationId: string) {
@@ -163,6 +180,20 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
     return detail;
   }
   const retryRevision = process.env.DDF_PILOT_RETRY_REVISION?.trim();
+  if (prior?.failed && prior.stage === 'SOURCE' && prior.candidateId && !prior.productId) {
+    const intake = ((await readState('intake'))?.payload ?? emptyIntake) as IntakeState;
+    const candidate = intake.candidates.find(item => item.id === prior.candidateId && candidateMatchesPilot(item, itemId));
+    if (candidate && !['REJEITADO', 'ARQUIVADO', 'INFORMACAO_SOLICITADA'].includes(candidate.status)) {
+      const product = await admitPilotProduct(candidate, correlationId);
+      if (product) {
+        prior.productId = product.id;
+        // Link the draft while preserving the consumed failure, stage, counts and history.
+        await db.query('UPDATE factory_production_runs SET product_id=$2,detail=$3,updated_at=now() WHERE candidate_id=$1', [key, product.id, JSON.stringify(prior)]);
+        console.info('DDF_PILOT_ADMISSION', JSON.stringify({ factoryDraftPresent: true, sourceFailurePreserved: true,
+          sourceCount: prior.sourceCount ?? 0, sourceRead: prior.sourceRead ?? 0, variantCount: product.spec?.variants.length ?? 0 }));
+      }
+    }
+  }
   // Operator explicitly acknowledges one technical routing repair. This cannot retry paid image work,
   // budget/access failures, or the same revision twice, even when the attempted repair also fails.
   const reviewedRepair = prior?.code === 'gateway_provider_invalid_request'
@@ -248,6 +279,10 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
       await save('PROCESSING', 'SOURCE');
     }
     checkpoint.candidateId = candidate.id;
+    if (candidate.status === 'INFORMACAO_SOLICITADA') return save('BLOCKED', 'SOURCE', { blocked: 1, code: 'pilot_origin_requires_review' });
+    const admitted = await admitPilotProduct(candidate, correlationId);
+    if (!admitted) return save('BLOCKED', 'PRODUCT', { blocked: 1, code: 'pilot_origin_ineligible' });
+    checkpoint.productId = admitted.id;
     checkpoint.stage = 'SOURCE';
     const supplier = supplierForImageReading(candidate);
     if (!supplier?.images.length) return save('BLOCKED', 'SOURCE', { blocked: 1, code: 'source_images_missing', sourceCount: 0 });

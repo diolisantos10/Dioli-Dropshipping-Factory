@@ -19,14 +19,21 @@ function fixture(t, { candidate, prior } = {}) {
   t.after(() => { if (previous === undefined) delete process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID; else process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID = previous; });
   t.after(() => { if (previousRetry === undefined) delete process.env.DDF_PILOT_RETRY_REVISION; else process.env.DDF_PILOT_RETRY_REVISION = previousRetry; });
   let saved, calls = 0;
+  const products = [];
+  const commandNames = [];
   const deps = {
     './server-state': { getDatabasePool: async () => ({ query: async (sql, args) => {
       if (sql.startsWith('SELECT detail')) return { rows: prior ? [{ detail: prior }] : [] };
       if (sql.startsWith('INSERT')) saved = JSON.parse(args[4]);
-      if (sql.startsWith('UPDATE')) saved = JSON.parse(args[1]);
+      if (sql.startsWith('UPDATE')) saved = JSON.parse(sql.includes('product_id=$2') ? args[2] : args[1]);
       return { rows: [] };
-    } }), readState: async namespace => ({ payload: namespace === 'intake' ? { candidates: candidate ? [candidate] : [] } : { products: [], events: [] } }) },
-    './command-runner': { runServerCommand: async (_name, input) => { calls++; if (input.supplier) candidate.supplier = input.supplier; } },
+    } }), readState: async namespace => ({ payload: namespace === 'intake' ? { candidates: candidate ? [candidate] : [] } : { products, events: [] } }) },
+    './command-runner': { runServerCommand: async (name, input) => {
+      calls++; commandNames.push(name);
+      if (input.supplier) candidate.supplier = input.supplier;
+      if (name === 'intake.transition') candidate.status = input.status;
+      if (name === 'products.start') products.push({ id: 'draft', candidateId: candidate.id, status: 'EM_PRODUCAO', spec: { variants: [] } });
+    } },
     './product-factory': { emptyProductFactory: { products: [], events: [] } }, './intake': { emptyIntake: { candidates: [] } },
     './ai-gateway': { GatewayError: class extends Error {}, generateGatewayText: async () => { throw new Error('Unexpected paid call'); } },
     './providers/supplier-stored.ts': { supplierForImageReading: value => value.supplier },
@@ -34,7 +41,7 @@ function fixture(t, { candidate, prior } = {}) {
     './stored-variant-repair.ts': { repairStoredVariantSchemas: async () => ({ repaired: 0 }) },
     './same-value.ts': { sameStoredValue: (before, after) => JSON.stringify(before) === JSON.stringify(after) },
   };
-  return { deps, get saved() { return saved; }, get calls() { return calls; } };
+  return { deps, products, commandNames, get saved() { return saved; }, get calls() { return calls; } };
 }
 test('media pause reads only pilot technical data and preserves failed studio history', async t => {
   const previous = process.env.DDF_MEDIA_PAUSED;
@@ -93,7 +100,7 @@ test('failed paid checkpoint is never automatically retried', async t => {
   assert.equal(result.reason, 'pilot_failed_requires_review');
   assert.equal(fx.calls, 0);
 });
-test('partial gallery checkpoints source reading without approving or generating', async t => {
+test('pilot enters triage and factory before partial source reading without final approval or generation', async t => {
   const candidate = { id: 'c', status: 'CANDIDATO', supplier: { ref: '1005013226256365', images: Array.from({ length: 9 }, (_, i) => `https://ae01.alicdn.com/${i}.png`) } };
   const fx = fixture(t, { candidate, prior: { candidateId: 'c' } });
   let reads = 0;
@@ -103,9 +110,39 @@ test('partial gallery checkpoints source reading without approving or generating
   assert.equal(result.sourceRead, 8);
   assert.equal(result.sourceCount, 9);
   assert.equal(result.continuing, 1);
-  assert.equal(candidate.status, 'CANDIDATO');
-  assert.equal(fx.calls, 1);
+  assert.equal(candidate.status, 'APROVADO');
+  assert.equal(fx.products[0].status, 'EM_PRODUCAO');
+  assert.equal(fx.saved.productId, 'draft');
+  assert.deepEqual(fx.commandNames, ['intake.transition', 'intake.transition', 'products.start', 'intake.refreshSupplier']);
+  assert.equal(fx.calls, 4);
   assert.equal(reads, 1);
+});
+
+test('failed source pilot progresses through audited triage to a visible draft without repeating paid work', async t => {
+  const prior = { candidateId: 'c', failed: true, stage: 'SOURCE', code: 'pilot_step_failed', sourceCount: 49, sourceRead: 0 };
+  const candidate = { id: 'c', status: 'CANDIDATO', supplier: { ref: '1005013226256365', images: [] } };
+  const fx = fixture(t, { candidate, prior });
+  fx.deps['./providers/supplier-vision.ts'] = { readSupplierImages: async () => assert.fail('Consumed source read must not repeat') };
+  const result = await load(fx.deps).runFactoryPilot('cron', 'corr');
+  assert.equal(result.blocked, 1);
+  assert.equal(fx.products.length, 1);
+  assert.deepEqual(fx.commandNames, ['intake.transition', 'intake.transition', 'products.start']);
+  assert.deepEqual(fx.saved, { ...prior, productId: 'draft' });
+  assert.equal(fx.saved.failed, true);
+  assert.equal(fx.saved.code, 'pilot_step_failed');
+  const calls = fx.calls;
+  await load(fx.deps).runFactoryPilot('cron', 'corr');
+  assert.equal(fx.calls, calls, 'admission is idempotent');
+});
+
+test('failed source admission never changes rejected, archived or information-requested origins', async t => {
+  for (const status of ['REJEITADO', 'ARQUIVADO', 'INFORMACAO_SOLICITADA']) {
+    const fx = fixture(t, { candidate: { id: 'c', status, supplier: { ref: '1005013226256365' } },
+      prior: { candidateId: 'c', failed: true, stage: 'SOURCE', code: 'pilot_step_failed' } });
+    await load(fx.deps).runFactoryPilot('cron', 'corr');
+    assert.equal(fx.calls, 0);
+    assert.equal(fx.saved, undefined);
+  }
 });
 
 test('operator revision consumes exactly one SOURCE routing retry and another failure freezes', async t => {
