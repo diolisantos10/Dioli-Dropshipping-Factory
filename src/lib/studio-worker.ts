@@ -6,6 +6,7 @@ import { emptyProductFactory, type ProductFactoryState } from './product-factory
 import { assessStudioSourceBatch, generateReviewedStudioImage, STUDIO_ANGLES } from './studio-gateway';
 import { GatewayError, gatewayConfigurationStatus } from './ai-gateway';
 import { archiveSourceAllowed } from './supplier-media-archive';
+import { archivedStudioReference } from './studio-reference-transport';
 
 const identity = { role: 'SYSTEM', actor: 'system:studio-production' };
 /** Bounded worker: up to three independent products per cron, one image per request, at most 45 source photos per run, explicit handoff required. */
@@ -43,6 +44,14 @@ export async function runStudioProduction(correlationId: string, targetProductId
     await runServerCommand('media.updateProductionRequest', { requestId: request.id, status: 'PROCESSANDO' }, { ...identity, correlationId });
     try {
       if (!sources.length || !angle || sources.length !== request.sourceAssetIds.length) throw new GatewayError('studio_missing_references', 'Todos os originais precisam estar disponíveis para inspeção; nenhuma foto foi ignorada.');
+      const referenceCache = new Map<string, string>();
+      const referenceFor = async (source: NonNullable<(typeof sources)[number]>) => {
+        const cached = referenceCache.get(source.id);
+        if (cached) return cached;
+        const reference = await archivedStudioReference(source, db);
+        referenceCache.set(source.id, reference);
+        return reference;
+      };
       const existing = request.sourceAssessment;
       const processed = new Set(existing?.angle === angle ? existing.processedSourceAssetIds : []);
       const supported = new Set(existing?.angle === angle ? existing.supportedSourceAssetIds : []);
@@ -51,7 +60,7 @@ export async function runStudioProduction(correlationId: string, targetProductId
       for (let offset = 0; offset < Math.min(sourceBudgetPerRequest, pendingSources.length); offset += 15) {
         const batch = pendingSources.slice(offset, Math.min(offset + 15, sourceBudgetPerRequest));
         const assessment = await assessStudioSourceBatch({ productId: product.id, title: product.universalTitle, angle,
-          references: batch.map(source => source!.sourceUrl ?? source!.url), variantIdentity, correlationId });
+          references: await Promise.all(batch.map(source => referenceFor(source!))), variantIdentity, correlationId });
         variantIdentity = assessment.variantIdentity;
         batch.forEach(source => processed.add(source!.id));
         assessment.supportedIndices.forEach(index => supported.add(batch[index - 1]!.id));
@@ -64,7 +73,7 @@ export async function runStudioProduction(correlationId: string, targetProductId
       }
       const selectedSources = sources.filter(source => supported.has(source!.id)).slice(0, 5);
       if (!selectedSources.length) throw new GatewayError('studio_unsupported_view', 'Nenhuma foto original comprova o ângulo solicitado na mesma variante; geração não executada.');
-      const references = selectedSources.map(source => source!.sourceUrl ?? source!.url);
+      const references = await Promise.all(selectedSources.map(source => referenceFor(source!)));
       const result = await generateReviewedStudioImage({ productId: product.id, title: product.universalTitle, angle, references, correlationId,
         variantIdentity, sourceVerified: true });
       const content = Buffer.from(result.image.base64, 'base64');

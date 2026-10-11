@@ -4,13 +4,20 @@ import { addMedia, reviewMedia, ingestSupplierOriginals, studioReadiness, type M
 
 export const STUDIO_SOURCE_SELECTION_REPAIR = 'studio-source-selection-repair-1';
 export const STUDIO_EMPTY_VARIANT_REPAIR = 'studio-empty-variant-repair-1';
+export const STUDIO_ARCHIVED_WEBP_REPAIR = 'studio-archived-webp-transport-1';
 export function canRetryStudioInspection(state: MediaState, requestId: string, revision: string) {
   const request = state.productionRequests?.find(item => item.id === requestId);
   const history = request?.inspectionRetryHistory ?? [];
   const reviewedRepair = revision === STUDIO_SOURCE_SELECTION_REPAIR && !history.length
     && request?.error === 'Produção não concluída (studio_missing_references); nenhuma foto foi presumida aprovada.'
     || revision === STUDIO_EMPTY_VARIANT_REPAIR && history.length === 1 && history[0].revision === STUDIO_SOURCE_SELECTION_REPAIR
-    && request?.error === 'Produção não concluída (studio_unsupported_view); nenhuma foto foi presumida aprovada.';
+    && request?.error === 'Produção não concluída (studio_unsupported_view); nenhuma foto foi presumida aprovada.'
+    || revision === STUDIO_ARCHIVED_WEBP_REPAIR && history.length === 2
+    && history[0].revision === STUDIO_SOURCE_SELECTION_REPAIR && history[1].revision === STUDIO_EMPTY_VARIANT_REPAIR
+    && request?.error === 'Produção não concluída (studio_unsupported_view); nenhuma foto foi presumida aprovada.'
+    && request.sourceAssetIds.every(id => state.assets.some(asset => asset.id === id && asset.productId === request.productId
+      && asset.kind === 'ORIGINAL' && asset.status === 'APROVADA' && asset.mimeType === 'image/webp'
+      && !!asset.sourceUrl && /^[a-f0-9]{64}$/i.test(asset.checksum ?? '')));
   if (!request || !reviewedRepair || request.status !== 'FALHOU'
     || !request.sourceAssetIds.length || !request.sourceAssessment || request.sourceAssessment.supportedSourceAssetIds.length
     || request.sourceAssessment.variantIdentity.trim()) return false;

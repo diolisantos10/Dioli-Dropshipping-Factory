@@ -21,6 +21,7 @@ test('single-product studio target leaves unrelated pending and stale paid reque
   './command-runner':{runServerCommand:async()=>assert.fail('Unrelated queue must not be mutated')},
   './media-factory':mediaRules,'./product-factory':{},'./studio-gateway':{},'./ai-gateway':{},
   './supplier-media-archive':archiveModule.exports,
+ './studio-reference-transport':{archivedStudioReference:async asset=>asset.url},
  };
  const code=ts.transpileModule(readFileSync(new URL('../src/lib/studio-worker.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  const workerModule={exports:{}};
@@ -40,6 +41,7 @@ test('fully inspected gallery without angle support stops before generation with
  './server-state':{getDatabasePool:async()=>({connect:async()=>connection}),readState:async domain=>({payload:domain==='media'?media:{products:[{id:'pilot',status:'EM_PRODUCAO',universalTitle:'Óculos'}]}})},
  './command-runner':{runServerCommand:async(_type,input)=>{media=updateMediaProductionRequest(media,input.requestId,input.status,new Date().toISOString(),input.error);return{payload:media};}},
  './media-factory':mediaRules,'./product-factory':{},'./supplier-media-archive':archiveModule.exports,
+ './studio-reference-transport':{archivedStudioReference:async asset=>asset.url},
  './ai-gateway':{GatewayError,gatewayConfigurationStatus:()=>({configured:true})},
  './studio-gateway':{STUDIO_ANGLES:['frontal'],assessStudioSourceBatch:async()=>assert.fail('Checkpointed sources cannot be reread'),generateReviewedStudioImage:async()=>assert.fail('Unseen angle cannot be generated')},
  };
@@ -63,6 +65,7 @@ test('worker real limita concorrência, preserva originais e não gera produto a
   './command-runner':{runServerCommand:async(type,input)=>{media=type==='media.checkpointStudioAssessment'?checkpointStudioAssessment(media,input.requestId,input,new Date().toISOString()):type==='media.recordStudioResult'?recordMediaProductionResult(media,input.requestId,input.asset,input.approved,`generated-${generated++}`,new Date().toISOString()):updateMediaProductionRequest(media,input.requestId,input.status,new Date().toISOString(),input.error);return{payload:media};}},
   './media-factory':mediaRules,'./product-factory':{emptyProductFactory:{products:[]}},
   './supplier-media-archive':archiveModule.exports,
+ './studio-reference-transport':{archivedStudioReference:async asset=>asset.url},
   './ai-gateway':{GatewayError,gatewayConfigurationStatus:()=>({configured:true})},
   './studio-gateway':{STUDIO_ANGLES:['frontal','lateral','posterior','tres-quartos'],assessStudioSourceBatch:async()=>({supportedIndices:[1],variantIdentity:'preto',evidence:'Frontal preto'}),generateReviewedStudioImage:async input=>{
     assert.notEqual(input.productId,'p0');active++;maxActive=Math.max(maxActive,active);await new Promise(resolve=>setTimeout(resolve,10));active--;
@@ -95,6 +98,7 @@ test('galerias grandes retomam checkpoints e nunca geram antes de ler todas as f
  './command-runner':{runServerCommand:async(type,input)=>{media=type==='media.checkpointStudioAssessment'?checkpointStudioAssessment(media,input.requestId,input,new Date().toISOString()):type==='media.recordStudioResult'?recordMediaProductionResult(media,input.requestId,input.asset,input.approved,`generated-${generated}`,new Date().toISOString()):updateMediaProductionRequest(media,input.requestId,input.status,new Date().toISOString(),input.error);return{payload:media};}},
  './media-factory':mediaRules,'./product-factory':{emptyProductFactory:{products:[]}},
  './supplier-media-archive':archiveModule.exports,
+ './studio-reference-transport':{archivedStudioReference:async asset=>asset.url},
  './ai-gateway':{GatewayError,gatewayConfigurationStatus:()=>({configured:true})},
  './studio-gateway':{STUDIO_ANGLES:['frontal','lateral','posterior','tres-quartos'],assessStudioSourceBatch:async input=>{assert.ok(input.references.length<=15);inspected+=input.references.length;const prior=seen.get(input.productId)??new Set();for(const url of input.references){assert.equal(prior.has(url),false,'Fotos já lidas não são cobradas novamente no mesmo ângulo');prior.add(url);}seen.set(input.productId,prior);return{supportedIndices:[1],variantIdentity:'preto',evidence:'Fonte fiel frontal'};},generateReviewedStudioImage:async input=>{assert.equal(seen.get(input.productId).size,31);assert.equal(input.sourceVerified,true);assert.equal(input.variantIdentity,'preto');generated++;return{image:{base64:Buffer.from(input.productId).toString('base64'),mimeType:'image/png',providerId:'openai',modelId:'image',generationId:input.productId},approved:true,evidence:'Produto fiel',reviewer:{providerId:'openai',modelId:'vision'}};}},
  };
