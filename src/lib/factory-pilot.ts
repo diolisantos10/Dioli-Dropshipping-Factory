@@ -11,7 +11,7 @@ import { generateGatewayText, GatewayError } from './ai-gateway';
 import { parseCommercialCopy } from './factory-production-rules';
 import { archiveSourceAllowed, persistSupplierOriginals } from './supplier-media-archive';
 import { runStudioProduction } from './studio-worker';
-import { canRetryStudioInspection, STUDIO_SOURCE_SELECTION_REPAIR } from './media-production-queue.ts';
+import { canRetryStudioInspection, STUDIO_SOURCE_SELECTION_REPAIR, STUDIO_EMPTY_VARIANT_REPAIR } from './media-production-queue.ts';
 
 type Connection = { id: string; name: string };
 type PilotCheckpoint = { candidateId?: string; productId?: string; stage?: string; code?: string; failed?: boolean; editorial?: boolean; retryRevision?: string; sourceCount?: number; sourceRead?: number; studio?: { results?: { code?: unknown }[] } };
@@ -26,13 +26,15 @@ export function storedStudioFailureCode(error: unknown) {
 }
 export function pilotStudioReferenceSummary(media: MediaState, productId: string) {
   const request = media.productionRequests?.find(item => item.productId === productId);
+  const evidence = (request?.sourceAssessment?.evidence ?? []).join(' ').slice(0, 10_000);
   const referenceIds = new Set(request?.sourceAssetIds ?? []);
   const approved = media.assets.filter(item => item.productId === productId && referenceIds.has(item.id) && item.kind === 'ORIGINAL' && item.status === 'APROVADA');
   return { requestReferenceCount: referenceIds.size, availableApprovedCount: approved.length,
     allowedReferenceCount: approved.filter(item => archiveSourceAllowed(item.sourceUrl ?? item.url)).length,
     assessmentProcessedCount: new Set(request?.sourceAssessment?.processedSourceAssetIds ?? []).size,
     assessmentSupportedCount: new Set(request?.sourceAssessment?.supportedSourceAssetIds ?? []).size,
-    assessmentHasVariant: !!request?.sourceAssessment?.variantIdentity?.trim() };
+    assessmentHasVariant: !!request?.sourceAssessment?.variantIdentity?.trim(),
+    reviewReportsUnavailableImages: /imagens? (?:não (?:foram (?:fornecidas|carregadas)|est(?:á|ão) dispon[ií]ve)|indispon[ií]ve)|não (?:consigo|pude|posso) (?:visualizar|acessar|ver) (?:as )?imagens|images? (?:are |were )?(?:unavailable|inaccessible|not (?:provided|loaded))|(?:cannot|unable to) (?:see|view|access) (?:the )?images/i.test(evidence) };
 }
 export function selectPilotSupplier(connections: Connection[], preferred?: string) {
   if (preferred) return connections.find(item => item.name.toLocaleLowerCase() === preferred.toLocaleLowerCase());
@@ -78,7 +80,8 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
       gaps = product ? productGaps(product).filter(gap => SAFE_GAPS.has(gap)) : [];
       const request = media.productionRequests?.find(item => item.productId === prior.productId);
       const references = pilotStudioReferenceSummary(media, prior.productId);
-      if (retryRevision === STUDIO_SOURCE_SELECTION_REPAIR && code === 'studio_missing_references' && request
+      if ((retryRevision === STUDIO_SOURCE_SELECTION_REPAIR && code === 'studio_missing_references'
+        || retryRevision === STUDIO_EMPTY_VARIANT_REPAIR && code === 'studio_unsupported_view') && request
         && references.allowedReferenceCount === references.requestReferenceCount && canRetryStudioInspection(media, request.id, retryRevision)) {
         // Audited command consumes the only repair revision and retains the old assessment.
         await runServerCommand('media.retryStudioInspection', { requestId: request.id, revision: retryRevision }, { role: 'SYSTEM', actor: 'system:factory-pilot:reviewed-inspection-repair', correlationId });

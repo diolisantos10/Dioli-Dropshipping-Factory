@@ -151,6 +151,10 @@ test('studio reference aggregates distinguish missing source assets from fully i
     { id: 'c', productId: 'other', kind: 'ORIGINAL', status: 'APROVADA', url: 'https://ae01.alicdn.com/c.jpg' },
   ], productionRequests: [{ productId: 'pilot', sourceAssetIds: ['a', 'b', 'missing'], sourceAssessment: { processedSourceAssetIds: ['a', 'b', 'missing'], supportedSourceAssetIds: [], variantIdentity: 'PRIVATE VARIANT' } }] };
   const result = pilot.pilotStudioReferenceSummary(media, 'pilot');
-  assert.deepEqual(result, { requestReferenceCount: 3, availableApprovedCount: 2, allowedReferenceCount: 1, assessmentProcessedCount: 3, assessmentSupportedCount: 0, assessmentHasVariant: true });
+  assert.deepEqual(result, { requestReferenceCount: 3, availableApprovedCount: 2, allowedReferenceCount: 1, assessmentProcessedCount: 3, assessmentSupportedCount: 0, assessmentHasVariant: true, reviewReportsUnavailableImages: false });
   assert.ok(!JSON.stringify(result).includes('PRIVATE'));
+  media.productionRequests[0].sourceAssessment.evidence = ['Não consigo visualizar as imagens PRIVATE PROVIDER EVIDENCE'];
+  const unavailable = pilot.pilotStudioReferenceSummary(media, 'pilot');
+  assert.equal(unavailable.reviewReportsUnavailableImages, true);
+  assert.ok(!JSON.stringify(unavailable).includes('PRIVATE'));
 });

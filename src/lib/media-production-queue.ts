@@ -3,10 +3,15 @@ import type { ProductFactoryState } from './product-factory.ts';
 import { addMedia, reviewMedia, ingestSupplierOriginals, studioReadiness, type MediaAsset, type MediaState, type MediaProductionRequest } from './media-factory.ts';
 
 export const STUDIO_SOURCE_SELECTION_REPAIR = 'studio-source-selection-repair-1';
+export const STUDIO_EMPTY_VARIANT_REPAIR = 'studio-empty-variant-repair-1';
 export function canRetryStudioInspection(state: MediaState, requestId: string, revision: string) {
   const request = state.productionRequests?.find(item => item.id === requestId);
-  if (!request || revision !== STUDIO_SOURCE_SELECTION_REPAIR || request.status !== 'FALHOU' || request.inspectionRetryHistory?.length
-    || request.error !== 'Produção não concluída (studio_missing_references); nenhuma foto foi presumida aprovada.'
+  const history = request?.inspectionRetryHistory ?? [];
+  const reviewedRepair = revision === STUDIO_SOURCE_SELECTION_REPAIR && !history.length
+    && request?.error === 'Produção não concluída (studio_missing_references); nenhuma foto foi presumida aprovada.'
+    || revision === STUDIO_EMPTY_VARIANT_REPAIR && history.length === 1 && history[0].revision === STUDIO_SOURCE_SELECTION_REPAIR
+    && request?.error === 'Produção não concluída (studio_unsupported_view); nenhuma foto foi presumida aprovada.';
+  if (!request || !reviewedRepair || request.status !== 'FALHOU'
     || !request.sourceAssetIds.length || !request.sourceAssessment || request.sourceAssessment.supportedSourceAssetIds.length
     || request.sourceAssessment.variantIdentity.trim()) return false;
   const refs = new Set(request.sourceAssetIds), processed = new Set(request.sourceAssessment.processedSourceAssetIds);
@@ -19,7 +24,7 @@ export function retryStudioInspection(state: MediaState, requestId: string, revi
   if (!canRetryStudioInspection(state, requestId, revision)) throw new Error('A solicitação não aceita esta única revisão técnica da seleção de fontes.');
   return { ...state, productionRequests: state.productionRequests?.map(request => request.id !== requestId ? request : {
     ...request, status: 'PENDENTE', updatedAt: at, error: undefined, sourceAssessment: undefined,
-    inspectionRetryHistory: [{ revision, at, actor, assessment: structuredClone(request.sourceAssessment!), error: request.error! }],
+    inspectionRetryHistory: [...(request.inspectionRetryHistory ?? []), { revision, at, actor, assessment: structuredClone(request.sourceAssessment!), error: request.error! }],
   }) };
 }
 

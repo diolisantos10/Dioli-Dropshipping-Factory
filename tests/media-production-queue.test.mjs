@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { emptyStates, executeCommand, authorizeCommand } from '../src/lib/commands.ts';
 import { studioReadiness } from '../src/lib/media-factory.ts';
-import { canRetryStudioInspection, retryStudioInspection, STUDIO_SOURCE_SELECTION_REPAIR } from '../src/lib/media-production-queue.ts';
+import { canRetryStudioInspection, retryStudioInspection, STUDIO_SOURCE_SELECTION_REPAIR, STUDIO_EMPTY_VARIANT_REPAIR } from '../src/lib/media-production-queue.ts';
 
 const at = '2026-10-10T01:00:00Z';
 let serial = 0;
@@ -59,6 +59,35 @@ test('reviewed source-selection repair is SYSTEM-only, once, before generation, 
     assert.throws(() => retryStudioInspection(bad, request.id, STUDIO_SOURCE_SELECTION_REPAIR, at, 'system:repair'));
   }
   assert.equal(canRetryStudioInspection(media, request.id, 'different-revision'), false);
+});
+test('empty-identity repair requires the exact prior reviewed inspection, retains both histories and never retries generated work', () => {
+  const states = fixture();
+  const initial = command(states, 'media.bulkSendToMedia', { productIds: ['p1'] });
+  const request = initial.productionRequests[0];
+  request.status = 'FALHOU';
+  request.error = 'Produção não concluída (studio_missing_references); nenhuma foto foi presumida aprovada.';
+  request.sourceAssessment = { angle: 'frontal', variantIdentity: '', processedSourceAssetIds: [...request.sourceAssetIds], supportedSourceAssetIds: [], evidence: ['First inspection'] };
+  const inspected = retryStudioInspection(initial, request.id, STUDIO_SOURCE_SELECTION_REPAIR, at, 'system:repair');
+  const current = inspected.productionRequests[0];
+  current.status = 'FALHOU';
+  current.error = 'Produção não concluída (studio_unsupported_view); nenhuma foto foi presumida aprovada.';
+  current.sourceAssessment = { ...structuredClone(request.sourceAssessment), evidence: ['Second inspection'] };
+  assert.equal(canRetryStudioInspection(inspected, request.id, STUDIO_EMPTY_VARIANT_REPAIR), true);
+  for (const mutate of [
+    value => { value.productionRequests[0].inspectionRetryHistory = []; },
+    value => { value.productionRequests[0].inspectionRetryHistory[0].revision = 'unreviewed'; },
+    value => { value.productionRequests[0].sourceAssessment.supportedSourceAssetIds = [request.sourceAssetIds[0]]; },
+    value => { value.assets.push({ id: 'attempted', productId: 'p1', kind: 'DERIVADA', studio: true, status: 'REJEITADA' }); },
+    value => { value.productionRequests[0].error = 'Produção não concluída (gateway_provider_timeout); nenhuma foto foi presumida aprovada.'; },
+  ]) {
+    const bad = structuredClone(inspected); mutate(bad);
+    assert.equal(canRetryStudioInspection(bad, request.id, STUDIO_EMPTY_VARIANT_REPAIR), false);
+  }
+  const repaired = retryStudioInspection(inspected, request.id, STUDIO_EMPTY_VARIANT_REPAIR, at, 'system:repair');
+  assert.equal(repaired.productionRequests[0].inspectionRetryHistory.length, 2);
+  assert.deepEqual(repaired.productionRequests[0].inspectionRetryHistory[0].assessment, request.sourceAssessment);
+  assert.deepEqual(repaired.productionRequests[0].inspectionRetryHistory[1].assessment, current.sourceAssessment);
+  assert.equal(canRetryStudioInspection(repaired, request.id, STUDIO_EMPTY_VARIANT_REPAIR), false);
 });
 test('envio em massa usa originais persistidos e não aprova cadastro nem imagens de estúdio', () => {
   const states = fixture();

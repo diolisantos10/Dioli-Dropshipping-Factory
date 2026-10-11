@@ -20,6 +20,18 @@ test('mixed source batch selects only individually supported images and preserve
   await assert.rejects(assessStudioSourceBatch({ ...input, variantIdentity }, async () => textResult({ ...sourceReview, variantIdentity: 'outra variante' })), error => error.code === 'studio_variant_mismatch');
 });
 
+test('first inspection treats empty or whitespace identity as no selected variant', async () => {
+  for (const variantIdentity of [undefined, '', '   ']) {
+    const result = await assessStudioSourceBatch({ ...input, variantIdentity }, async request => {
+      assert.equal(JSON.parse(request.prompt).selectedVariantIdentity, null);
+      assert.match(request.system, /null ou vazio significa que NENHUMA variante foi selecionada/);
+      return textResult(sourceReview);
+    });
+    assert.deepEqual(result.supportedIndices, [1]);
+    assert.equal(result.variantIdentity, sourceReview.variantIdentity);
+  }
+});
+
 test('fonte não mostra ângulo: bloqueia antes de pagar geração', async () => {
   let generated = 0;
   await assert.rejects(generateReviewedStudioImage(input, { text: async () => textResult({ approved:false, sourceSupportsAngle:false, variantIdentity:'', supportedIndices:[], evidence:'Só imagem frontal; lateral oculta.' }), image: async () => { generated++; return image; } }), e => e.code === 'studio_unsupported_view');
@@ -66,7 +78,7 @@ test('transporte de imagem mantém referências e centralização, rejeita base6
  const refs=Array.from({length:37},(_,i)=>`https://ae01.alicdn.com/${i}.png`);let seen=0;let batches=0;
  const result=await generateReviewedStudioImage({...input,references:refs},{text:async req=>{if(req.referenceImages.at(-1).startsWith('data:'))return textResult(finalReview);
  assert.ok(req.referenceImages.length<=15);seen+=req.referenceImages.length;batches++;
- const selected=JSON.parse(req.prompt).selectedVariantIdentity;assert.equal(selected,batches===1?'':'armação preta');
+ const selected=JSON.parse(req.prompt).selectedVariantIdentity;assert.equal(selected,batches===1?null:'armação preta');
  return textResult({...sourceReview,supportedIndices:[1]});},image:async req=>{assert.deepEqual(req.referenceImages,[refs[0],refs[15],refs[30]]);return image;}});
  assert.equal(seen,37);assert.equal(batches,3);assert.equal(result.approved,true);
  });
