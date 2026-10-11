@@ -2,7 +2,7 @@ import { aliexpressPageAccess, supplierPageUrl } from './providers/supplier-page
 import { getDatabasePool, readState } from './server-state';
 import { runServerCommand } from './command-runner';
 import { getSupplierAdapterForIntegration } from './integrations';
-import { emptyIntake, type Candidate, type IntakeState } from './intake';
+import { emptyIntake, type Candidate, type IntakeState, type CandidateSupplier } from './intake';
 import { emptyProductFactory, productGaps, type ProductFactoryState } from './product-factory';
 import { emptyMedia, approvedStudioAssets, studioReadiness, type MediaState } from './media-factory';
 import { supplierCandidateInput } from './supplier-product';
@@ -20,6 +20,15 @@ import { canRetryStudioInspection, STUDIO_SOURCE_SELECTION_REPAIR, STUDIO_EMPTY_
 type Connection = { id: string; name: string };
 type PilotCheckpoint = { candidateId?: string; productId?: string; stage?: string; code?: string; failed?: boolean; editorial?: boolean; retryRevision?: string; sourceCount?: number; sourceRead?: number; studio?: { results?: { code?: unknown }[] } };
 const SAFE_GAPS = new Set(['Título universal', 'Categoria', 'Descrição curta', 'Descrição longa', 'Material', 'Peso confirmado de cada item', 'Dimensões confirmadas de cada item']);
+export function technicalEvidenceCounts(supplier: CandidateSupplier) {
+  const evidence = supplier.visualAttributes ?? [];
+  const groups = new Map<string, Set<string>>();
+  for (const item of evidence) { const key = JSON.stringify([item.sku ?? '', item.key]); const values = groups.get(key) ?? new Set<string>(); values.add(item.value); groups.set(key, values); }
+  return { visualEvidenceCount: evidence.length, unscopedVisualEvidenceCount: evidence.filter(item => !item.sku).length,
+    conflictingVisualAttributeCount: [...groups.values()].filter(values => values.size > 1).length,
+    measurementEvidenceCount: (supplier.facts ?? []).length, variantCount: (supplier.variants ?? []).length,
+    variantsWithWeight: (supplier.variants ?? []).filter(item => Number(item.weightGrams) > 0).length };
+}
 export function safePilotCode(value: unknown) {
   if (typeof value !== 'string') return undefined;
   return /^(?:gateway_(?:not_configured|invalid_configuration|invalid_request|unavailable|invalid_response|pairing_required|policy_blocked|execution_failed)|gateway_provider_(?:invalid_request|unavailable|timeout|access_denied|budget_exceeded)(?:_http_\d{3})?|studio_(?:invalid_review|missing_references|variant_mismatch|unsupported_view|source_integrity_failed|source_conversion_failed|duplicate_image|execution_failed|checkpoint_failed|source_integrity_failed|source_conversion_failed)|pilot_studio_requires_review)$/.test(value) ? value : undefined;
@@ -106,9 +115,15 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
     }
     if (supplier.vision?.revision === SUPPLIER_VISION_REVISION && supplier.vision.completed
       && (process.env.DDF_SUPPLIER_PAGE_ENABLED !== 'true' || supplier.pageRead?.revision === SUPPLIER_PAGE_REVISION)) {
-      return { stage: 'TECHNICAL_DATA', sourceRead: supplier.vision.processedImages.length, sourceCount: supplier.images.length,
+      const products = ((await readState('products'))?.payload ?? emptyProductFactory) as ProductFactoryState;
+      const product = products.products.find(item => item.candidateId === candidate.id && !item.archivedAt);
+      const gaps = product ? productGaps(product).filter(gap => SAFE_GAPS.has(gap)) : [];
+      const detail = { stage: 'TECHNICAL_DATA', sourceRead: supplier.vision.processedImages.length, sourceCount: supplier.images.length,
         pageReadStatus: supplier.pageRead?.status ?? 'NOT_ATTEMPTED', pageReadCode: supplier.pageRead?.code,
-        technicalAttributes: Object.keys(supplier.specifications ?? {}).length, mediaPaused: true, continuing: 0 };
+        technicalAttributes: Object.keys(supplier.specifications ?? {}).length, ...technicalEvidenceCounts(supplier), gapCount: gaps.length, gaps,
+        blocked: gaps.length || supplier.pageRead?.status === 'BLOCKED' ? 1 : 0, mediaPaused: true, continuing: 0 };
+      console.info('DDF_FACTORY_TECHNICAL_READ', JSON.stringify(detail));
+      return detail;
     }
     if (process.env.DDF_SUPPLIER_PAGE_ENABLED === 'true' && supplier.pageRead?.revision !== SUPPLIER_PAGE_REVISION) {
       if (!supplier.rawData) return { stage: 'SOURCE', blocked: 1, code: 'stored_supplier_payload_missing' };
@@ -137,7 +152,7 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
     if (product) await runServerCommand('products.refreshSupplier', { productId: product.id }, identity);
     const detail = { stage: 'TECHNICAL_DATA', sourceRead: read.vision?.processedImages.length ?? 0, sourceCount: read.images.length,
       pageReadStatus: read.pageRead?.status ?? 'NOT_ATTEMPTED', pageReadCode: read.pageRead?.code, technicalAttributes: Object.keys(read.specifications ?? {}).length,
-      mediaPaused: true, continuing: read.vision?.completed ? 0 : 1 };
+      ...technicalEvidenceCounts(read), blocked: read.vision?.completed && read.pageRead?.status === 'BLOCKED' ? 1 : 0, mediaPaused: true, continuing: read.vision?.completed ? 0 : 1 };
     console.info('DDF_FACTORY_TECHNICAL_READ', JSON.stringify(detail));
     return detail;
   }
