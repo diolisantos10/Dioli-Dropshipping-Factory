@@ -12,16 +12,17 @@ const supplier = { name: 'Fornecedor teste', ref: '1005013226256365', cost: 19, 
 const candidate = (id, status) => ({ id, name: `Óculos ${id}`, url: 'https://www.aliexpress.com/item/1005013226256365.html', notes: '', status, createdAt: '2026-10-11', supplier });
 const spec = { variants: [{ ...sourceVariant, id: 'v1', title: sourceVariant.label, gtin: '' }], materials: ['PC'], colors: [], sizes: [], seo: { title: '', description: '' }, compliance: { notes: '', certifications: [] }, localizations: {}, destinationGaps: {} };
 const product = (id, status) => ({ id, candidateId: 'raw', universalTitle: `Óculos ${id}`, shortDescription: 'Óculos', longDescription: 'Descrição', category: 'Óculos', bullets: [], benefits: [], tags: [], status, version: 1, createdAt: '2026-10-11', updatedAt: '2026-10-11', spec });
-const states = { intake: { version: 1, candidates: [candidate('raw', 'CANDIDATO'), candidate('triage', 'TRIADO'), { ...candidate('legacy', 'CANDIDATO'), supplier: undefined }], events: [] }, products: { version: 1, products: [product('draft', 'EM_PRODUCAO'), product('ready', 'PRONTO')], events: [] }, media: { version: 1, assets: [], events: [] } };
+const states = { intake: { version: 1, candidates: [candidate('raw', 'CANDIDATO'), candidate('triage', 'TRIADO'), { ...candidate('legacy', 'CANDIDATO'), supplier: undefined }], events: [] }, products: { version: 1, products: [product('draft', 'EM_PRODUCAO'), product('ready', 'PRONTO')], events: [] }, media: { version: 1, assets: [{ id: 'raw-reference', productId: 'ready', kind: 'ORIGINAL', status: 'APROVADA', url: 'https://fixture.invalid/reference.png' }, ...['front', 'back', 'left', 'right'].map(angle => ({ id: angle, productId: 'ready', kind: 'DERIVADA', status: 'APROVADA', studio: true, studioAngle: angle, url: `https://fixture.invalid/${angle}.png`, mimeType: 'image/png', sourceAssetIds: ['raw-reference'], fidelityVerified: true, fidelityEvidence: 'Test fixture only; no real product or generation' }))], events: [] } };
 try {
   let started = false;
   for (let attempt = 0; attempt < 80; attempt++) { try { if ((await fetch(`${base}/visao-geral`, { headers: { authorization: auth } })).ok) { started = true; break; } } catch {} await new Promise(resolve => setTimeout(resolve, 250)); }
   assert.ok(started, output);
   browser = await chromium.launch({ headless: true, ...(process.env.DDF_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.DDF_CHROMIUM_EXECUTABLE_PATH } : {}) });
   const context = await browser.newContext({ httpCredentials: { username: 'interface-test', password: 'local-variant-test-password' }, viewport: { width: 1280, height: 900 } });
+  await context.route('https://fixture.invalid/**', route => route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6duAAAAAASUVORK5CYII=', 'base64') }));
   await context.route('**/api/state/*', route => { const namespace = new URL(route.request().url()).pathname.split('/').pop(); return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ payload: states[namespace], revision: 1 }) }); });
   const page = await context.newPage();
-  for (const [path, name] of [['/prateleira-bruta', 'Abrir detalhes de Óculos raw'], ['/triagem', 'Abrir detalhes de Óculos triage'], ['/product-factory', 'Abrir Óculos draft'], ['/disponiveis', 'Abrir Óculos ready']]) {
+  for (const [path, name] of [['/prateleira-bruta', 'Abrir detalhes de Óculos raw'], ['/triagem', 'Abrir detalhes de Óculos triage'], ['/product-factory', 'Abrir Óculos draft'], ['/disponiveis', 'Abrir detalhes de Óculos ready']]) {
     await page.goto(base + path);
     await page.getByRole('button', { name, exact: true }).click();
     const section = page.getByRole('region', { name: 'Ficha das variantes', exact: true });

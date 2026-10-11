@@ -22,6 +22,7 @@ export async function repairStoredVariantSchemas(intake: IntakeState, products: 
   return { candidateCount: intake.candidates.length,
     candidatesWithVariants: intake.candidates.filter(item => item.supplier?.variants?.length).length,
     candidatesWithoutStructuredSupplier: intake.candidates.filter(item => !item.supplier).length,
+    candidatesWithStoredRawWithoutVariants: intake.candidates.filter(item => item.supplier?.rawData && !item.supplier?.variants?.length).length,
     candidatesWithoutRecordedVariants: intake.candidates.filter(item => !item.supplier?.variants?.length).length,
     masterCount: products.products.length, mastersWithoutRecordedVariants: products.products.filter(item => !item.spec?.variants?.length).length,
     repairable, repaired, remaining: Math.max(0, repairable - repaired) };
