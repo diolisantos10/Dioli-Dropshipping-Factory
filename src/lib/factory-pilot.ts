@@ -7,6 +7,7 @@ import { emptyMedia, approvedStudioAssets, studioReadiness, type MediaState } fr
 import { supplierCandidateInput } from './supplier-product';
 import { readSupplierImages } from './providers/supplier-vision.ts';
 import { supplierForImageReading } from './providers/supplier-stored.ts';
+import { parseDsProduct } from './providers/aliexpress.ts';
 import { generateGatewayText, GatewayError } from './ai-gateway';
 import { parseCommercialCopy } from './factory-production-rules';
 import { archiveSourceAllowed, persistSupplierOriginals } from './supplier-media-archive';
@@ -47,6 +48,20 @@ export function pilotStudioReferenceSummary(media: MediaState, productId: string
     reviewMentionsVariantConflict: /variantes? (?:diferentes|distintas)|cores? diferentes|different variants?|mismatch|mixed variants?/i.test(evidence),
     reviewReportsUnavailableImages: /imagens? (?:não (?:foram (?:fornecidas|carregadas)|est(?:á|ão) dispon[ií]ve)|indispon[ií]ve)|não (?:consigo|pude|posso) (?:visualizar|acessar|ver) (?:as )?imagens|images? (?:are |were )?(?:unavailable|inaccessible|not (?:provided|loaded))|(?:cannot|unable to) (?:see|view|access) (?:the )?images/i.test(evidence) };
 }
+/** Compare saved supplier payload only; no provider request, state mutation, or URL disclosure. */
+export function pilotStoredImportSummary(candidate?: Candidate) {
+  const supplier = candidate?.supplier;
+  if (!supplier?.rawData) return { storedRawAvailable: false };
+  try {
+    const parsed = parseDsProduct({ result: supplier.rawData }, supplier.ref, supplier.currency);
+    const existing = new Set(supplier.images);
+    const additional = (parsed.images ?? []).filter(url => !existing.has(url) && archiveSourceAllowed(url));
+    const base = supplier.rawData.ae_item_base_info_dto;
+    return { storedRawAvailable: true, recoveredSourceCount: parsed.images?.length ?? 0, additionalAllowedSourceCount: new Set(additional).size,
+      storedMobileDetailPresent: !!(base && typeof base === 'object' && (base as Record<string, unknown>).mobile_detail) };
+  } catch { return { storedRawAvailable: true, storedRawParseFailed: true }; }
+}
+
 export function selectPilotSupplier(connections: Connection[], preferred?: string) {
   if (preferred) return connections.find(item => item.name.toLocaleLowerCase() === preferred.toLocaleLowerCase());
   const branded = connections.filter(item => /sanchio|santioh/i.test(item.name));
@@ -87,7 +102,8 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
       const product = (((await readState('products'))?.payload ?? emptyProductFactory) as ProductFactoryState).products.find(item => item.id === prior.productId);
       code = code ?? storedStudioFailureCode(media.productionRequests?.find(item => item.productId === prior.productId)?.error);
       approvedPhotos = approvedStudioAssets(media, prior.productId).length;
-      referenceSummary = pilotStudioReferenceSummary(media, prior.productId);
+      const recordedCandidate = (((await readState('intake'))?.payload ?? emptyIntake) as IntakeState).candidates?.find(item => item.id === prior.candidateId);
+      referenceSummary = { ...pilotStudioReferenceSummary(media, prior.productId), ...pilotStoredImportSummary(recordedCandidate) };
       gaps = product ? productGaps(product).filter(gap => SAFE_GAPS.has(gap)) : [];
       const request = media.productionRequests?.find(item => item.productId === prior.productId);
       const references = pilotStudioReferenceSummary(media, prior.productId);

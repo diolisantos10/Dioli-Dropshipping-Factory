@@ -45,11 +45,11 @@ test('variantes mantêm medidas próprias e evidências sobrevivem à prateleira
   assert.equal(product.materials[0], 'Metal');
   assert.deepEqual(product.rawData, raw);
   const candidate = supplierCandidateInput(product, 'AliExpress');
-  assert.equal(candidate.supplier.importRevision, 2);
+  assert.equal(candidate.supplier.importRevision, 3);
   assert.equal(candidate.supplier.variants[1].dimensions.heightCm, 14);
   const persisted = executeCommand('intake.addCandidate', structuredClone(emptyStates), candidate,
     { actor: 'test', role: 'ADMIN', at: '2026-10-09T12:00:00Z', newId: () => 'test-import' }).payload.candidates[0];
-  assert.equal(persisted.supplier.importRevision, 2);
+  assert.equal(persisted.supplier.importRevision, 3);
   assert.equal(persisted.supplier.variants[1].dimensions.heightCm, 14);
   assert.equal(persisted.supplier.variants[1].facts[0].sku, '14');
 });

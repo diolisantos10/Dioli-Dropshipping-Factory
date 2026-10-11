@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 import type { SupplierAdapter, SupplierProduct } from './types';
-import { supplierDescriptionContent, supplierMeasurements, SUPPLIER_IMPORT_REVISION } from './supplier-content.ts';
+import { supplierDescriptionContent, supplierMobileContent, supplierMeasurements, SUPPLIER_IMPORT_REVISION } from './supplier-content.ts';
 
 // AliExpress Open Platform (IOP/GOP protocol). Business APIs go through /sync with
 // `method` as a signed parameter; system APIs (/auth/*) go through /rest{path} and
@@ -195,8 +195,11 @@ export function parseDsProduct(body: Record<string, unknown>, itemId: string, fa
   const quantities = skus.map(stockOf);
   const knownStock = quantities.every((quantity) => typeof quantity === 'number');
   const images = [...new Set((Array.isArray(multimedia.image_urls) ? multimedia.image_urls.map(text) : text(multimedia.image_urls).split(';')).map(httpsUrl).filter(Boolean))];
+  const skuImages: string[] = [];
   const variants = skus.map((sku, index) => {
     const properties = list(sku.ae_sku_property_dtos).map(record);
+    const propertyImages = [...new Set(properties.map(item => httpsUrl(item.sku_image)).filter(Boolean))];
+    skuImages.push(...propertyImages);
     const label = properties.map((item) => text(item.property_value_definition_name ?? item.sku_property_value)).filter(Boolean).join(' / ');
     const price = priceOf(sku);
     const stock = stockOf(sku);
@@ -206,7 +209,7 @@ export function parseDsProduct(body: Record<string, unknown>, itemId: string, fa
     return {
       sku: variantId, label: label || `Variante ${index + 1}`,
       price: Number.isFinite(price) && price > 0 ? price : null, stock: typeof stock === 'number' ? stock : null,
-      imageUrl: httpsUrl(properties.map((item) => text(item.sku_image)).find(Boolean)),
+      imageUrl: propertyImages[0] ?? '',
       attributes, ...(measurements.dimensions ? { dimensions: measurements.dimensions } : {}),
       ...(measurements.weightGrams ? { weightGrams: measurements.weightGrams } : {}),
       ...(measurements.facts.length ? { facts: measurements.facts } : {}),
@@ -219,11 +222,12 @@ export function parseDsProduct(body: Record<string, unknown>, itemId: string, fa
   const descriptionHtml = text(base.detail ?? base.description);
   // Keep supplier HTML as evidence, but display plain text: no remote scripts or injected markup.
   const content = supplierDescriptionContent(descriptionHtml);
-  const description = content.description;
-  const descriptionImages = content.images;
+  const mobile = supplierMobileContent(text(base.mobile_detail));
+  const description = [...new Set([content.description, mobile.description].filter(Boolean))].join('\n\n');
+  const descriptionImages = [...content.images, ...mobile.images];
   // Preserve every available gallery, description and variant image, without the old 20-photo cap.
-  const allImages = [...new Set([...images, ...descriptionImages, ...variants.map(variant => variant.imageUrl).filter(Boolean)])];
-  const specifications: Record<string, string> = { ...content.specifications, ...Object.fromEntries(list(result.ae_item_properties).map(record).map(property => [text(property.attr_name ?? property.property_name), text(property.attr_value ?? property.property_value)]).filter(([key, value]) => key && value)) };
+  const allImages = [...new Set([...images, ...descriptionImages, ...skuImages])];
+  const specifications: Record<string, string> = { ...mobile.specifications, ...content.specifications, ...Object.fromEntries(list(result.ae_item_properties).map(record).map(property => [text(property.attr_name ?? property.property_name), text(property.attr_value ?? property.property_value)]).filter(([key, value]) => key && value)) };
   const facts = [
     ...supplierMeasurements(text(base.subject), 'title').facts,
     ...supplierMeasurements(description, 'description').facts,
@@ -245,7 +249,7 @@ export function parseDsProduct(body: Record<string, unknown>, itemId: string, fa
     currency: (text(skus[0]?.currency_code) || text(base.currency_code) || fallbackCurrency).toUpperCase(),
     imageUrl: images[0] ?? '',
     images: allImages, variants, description, specifications, materials,
-    importRevision: SUPPLIER_IMPORT_REVISION, facts, imageLabels: content.imageLabels,
+    importRevision: SUPPLIER_IMPORT_REVISION, facts, imageLabels: [...new Set([...content.imageLabels, ...mobile.imageLabels])],
     ...(Object.keys(dimensions).length ? { dimensions } : {}),
     ...(weightValues.length === 1 ? { weightGrams: weightValues[0] } : {}),
     packageDimensions, packageWeightGrams: packageWeightKg === undefined ? undefined : packageWeightKg * 1000,
