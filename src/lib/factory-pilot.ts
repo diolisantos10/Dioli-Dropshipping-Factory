@@ -11,14 +11,14 @@ import { generateGatewayText, GatewayError } from './ai-gateway';
 import { parseCommercialCopy } from './factory-production-rules';
 import { archiveSourceAllowed, persistSupplierOriginals } from './supplier-media-archive';
 import { runStudioProduction } from './studio-worker';
-import { canRetryStudioInspection, STUDIO_SOURCE_SELECTION_REPAIR, STUDIO_EMPTY_VARIANT_REPAIR, STUDIO_ARCHIVED_WEBP_REPAIR } from './media-production-queue.ts';
+import { canRetryStudioInspection, STUDIO_SOURCE_SELECTION_REPAIR, STUDIO_EMPTY_VARIANT_REPAIR, STUDIO_RASTER_DELIVERY_REPAIR } from './media-production-queue.ts';
 
 type Connection = { id: string; name: string };
 type PilotCheckpoint = { candidateId?: string; productId?: string; stage?: string; code?: string; failed?: boolean; editorial?: boolean; retryRevision?: string; sourceCount?: number; sourceRead?: number; studio?: { results?: { code?: unknown }[] } };
 const SAFE_GAPS = new Set(['Título universal', 'Categoria', 'Descrição curta', 'Descrição longa', 'Material', 'Peso confirmado de cada item', 'Dimensões confirmadas de cada item']);
 export function safePilotCode(value: unknown) {
   if (typeof value !== 'string') return undefined;
-  return /^(?:gateway_(?:not_configured|invalid_configuration|invalid_request|unavailable|invalid_response|pairing_required|policy_blocked|execution_failed)|gateway_provider_(?:invalid_request|unavailable|timeout|access_denied|budget_exceeded)(?:_http_\d{3})?|studio_(?:invalid_review|missing_references|variant_mismatch|unsupported_view|source_integrity_failed|source_conversion_failed|duplicate_image|execution_failed|checkpoint_failed)|pilot_studio_requires_review)$/.test(value) ? value : undefined;
+  return /^(?:gateway_(?:not_configured|invalid_configuration|invalid_request|unavailable|invalid_response|pairing_required|policy_blocked|execution_failed)|gateway_provider_(?:invalid_request|unavailable|timeout|access_denied|budget_exceeded)(?:_http_\d{3})?|studio_(?:invalid_review|missing_references|variant_mismatch|unsupported_view|duplicate_image|execution_failed|checkpoint_failed|reference_invalid|reference_size|reference_integrity|reference_format)|pilot_studio_requires_review)$/.test(value) ? value : undefined;
 }
 export function storedStudioFailureCode(error: unknown) {
   if (typeof error !== 'string') return undefined;
@@ -88,8 +88,9 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
       const request = media.productionRequests?.find(item => item.productId === prior.productId);
       const references = pilotStudioReferenceSummary(media, prior.productId);
       if ((retryRevision === STUDIO_SOURCE_SELECTION_REPAIR && code === 'studio_missing_references'
-        || [STUDIO_EMPTY_VARIANT_REPAIR, STUDIO_ARCHIVED_WEBP_REPAIR].includes(retryRevision ?? '') && code === 'studio_unsupported_view') && request
-        && references.allowedReferenceCount === references.requestReferenceCount && canRetryStudioInspection(media, request.id, retryRevision ?? '')) {
+        || retryRevision === STUDIO_EMPTY_VARIANT_REPAIR && code === 'studio_unsupported_view'
+        || retryRevision === STUDIO_RASTER_DELIVERY_REPAIR && code === 'studio_unsupported_view') && request
+        && references.allowedReferenceCount === references.requestReferenceCount && canRetryStudioInspection(media, request.id, retryRevision)) {
         // Audited command consumes the only repair revision and retains the old assessment.
         await runServerCommand('media.retryStudioInspection', { requestId: request.id, revision: retryRevision }, { role: 'SYSTEM', actor: 'system:factory-pilot:reviewed-inspection-repair', correlationId });
         prior.failed = false;
