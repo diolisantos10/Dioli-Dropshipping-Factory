@@ -21,6 +21,8 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: node scripts/test-supplier-page.mjs
+      - run: docker build -f docker/supplier-browser.Dockerfile -t ddf-supplier-browser .
+      - run: docker run --rm --entrypoint node ddf-supplier-browser scripts/test-supplier-page.mjs
       - run: npm run db:verify
       - run: npm run check
       - run: npm run test:e2e
