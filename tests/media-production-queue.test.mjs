@@ -16,6 +16,22 @@ function fixture() {
 function command(states, type, input, role = 'OPERATOR') {
   return executeCommand(type, states, input, { ...context, role }).payload;
 }
+test('audited per-photo diagnostics preserve unknown values, photo identity and earlier angles', () => {
+  const states = fixture();
+  states.media = command(states, 'media.bulkSendToMedia', { productIds: ['p1'] });
+  const request = states.media.productionRequests[0];
+  states.media = command(states, 'media.updateProductionRequest', { requestId: request.id, status: 'PROCESSANDO' }, 'SYSTEM');
+  const row = { sourceAssetId: request.sourceAssetIds[0], sourceIndex: 1, angle: 'frontal', reviewerDecision: null,
+    angleSupported: false, variantMatches: null, indexSelected: false, indicesValid: true, batchApproved: false,
+    batchSupportsAngle: false, decisionScope: 'BATCH', angleScope: 'IMAGE', supported: false,
+    failedConditions: ['angle', 'index'], evidence: 'Side image does not show frontal' };
+  const base = { requestId: request.id, angle: 'frontal', variantIdentity: '', evidence: [], processedSourceAssetIds: [row.sourceAssetId], supportedSourceAssetIds: [] };
+  states.media = command(states, 'media.checkpointStudioAssessment', { ...base, photoDiagnostics: [row] }, 'SYSTEM');
+  assert.deepEqual(states.media.productionRequests[0].sourceAssessment.photoDiagnostics[0], row);
+  states.media = command(states, 'media.checkpointStudioAssessment', { ...base, angle: 'lateral', photoDiagnostics: [{ ...row, angle: 'lateral' }] }, 'SYSTEM');
+  assert.equal(states.media.productionRequests[0].sourceAssessment.photoDiagnostics.length, 2);
+  assert.throws(() => command(states, 'media.checkpointStudioAssessment', { ...base, photoDiagnostics: [{ ...row, sourceIndex: 2 }] }, 'SYSTEM'), /referências inválidas/);
+});
 test('reviewed source-selection repair is SYSTEM-only, once, before generation, and preserves full old inspection history', t => {
   const oldPilot = process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID;
   process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID = '1005013226256365';

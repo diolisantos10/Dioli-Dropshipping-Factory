@@ -25,7 +25,8 @@ export type MediaProductionRequest = {
   id: string; productId: string; status: 'PENDENTE' | 'PROCESSANDO' | 'CONCLUIDO' | 'BLOQUEADO' | 'FALHOU';
   requestedAt: string; requestedBy: string; updatedAt: string; sourceAssetIds: string[];
   requiredCount: 4; error?: string;
-  sourceAssessment?: { angle: string; variantIdentity: string; processedSourceAssetIds: string[]; supportedSourceAssetIds: string[]; evidence: string[] };
+  sourceAssessment?: { angle: string; variantIdentity: string; processedSourceAssetIds: string[]; supportedSourceAssetIds: string[]; evidence: string[];
+    photoDiagnostics?: (Omit<import('./studio-gateway').StudioSourceDiagnostic, 'index'> & { sourceAssetId: string; sourceIndex: number; angle: string })[] };
   inspectionRetryHistory?: { revision: string; at: string; actor: string; assessment: NonNullable<MediaProductionRequest['sourceAssessment']>; error: string }[];
 };
 export type MediaState = { version: 1 | 2; assets: MediaAsset[]; jobs?: TransformationJob[]; productionRequests?: MediaProductionRequest[] };

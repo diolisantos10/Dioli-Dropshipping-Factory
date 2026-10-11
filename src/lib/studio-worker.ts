@@ -61,7 +61,19 @@ export async function runStudioProduction(correlationId: string, targetProductId
       for (let offset = 0; offset < Math.min(sourceBudgetPerRequest, pendingSources.length); offset += 15) {
         const batch = pendingSources.slice(offset, Math.min(offset + 15, sourceBudgetPerRequest));
         const assessment = await assessStudioSourceBatch({ productId: product.id, title: product.universalTitle, angle,
-          references: await Promise.all(batch.map(source => referenceFor(source!))), variantIdentity, correlationId });
+          references: await Promise.all(batch.map(source => referenceFor(source!))), variantIdentity, correlationId,
+          onSourceDiagnostics: async rows => {
+            const photoDiagnostics = rows.map(({ index, ...row }) => ({ ...row, angle, sourceAssetId: batch[index - 1]!.id,
+              sourceIndex: request.sourceAssetIds.indexOf(batch[index - 1]!.id) + 1 }));
+            await runServerCommand('media.checkpointStudioAssessment', { requestId: request.id, angle, variantIdentity,
+              processedSourceAssetIds: [...processed, ...batch.map(source => source!.id)], supportedSourceAssetIds: [...supported], evidence: [], photoDiagnostics }, { ...identity, correlationId });
+            for (const diagnostic of photoDiagnostics) {
+              const row = Object.fromEntries(Object.entries(diagnostic).filter(([key]) => !['sourceAssetId', 'evidence'].includes(key)));
+              // Stable ordinal identifies the photo; provider evidence and private identities stay in the audited state.
+              console.info('DDF_STUDIO_SOURCE_DIAGNOSTIC', JSON.stringify({ ...row,
+                notReported: ['reviewerDecision', 'angleSupported', 'variantMatches', 'indexSelected'].filter(key => row[key] === null) }));
+            }
+          } });
         variantIdentity = assessment.variantIdentity;
         batch.forEach(source => processed.add(source!.id));
         assessment.supportedIndices.forEach(index => supported.add(batch[index - 1]!.id));

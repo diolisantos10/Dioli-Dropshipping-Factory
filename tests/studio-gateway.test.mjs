@@ -8,6 +8,44 @@ const sourceReview = { approved:true, sourceSupportsAngle:true, variantIdentity:
 const finalReview = { approved:true, sourceSupportsAngle:true, neutralBackground:true, square:true, noPeople:true, hyperrealistic:true, geometryUnchanged:true, evidence:'Produto idêntico, imagem quadrada e hiper-realista sem pessoas' };
 const image = { base64: Buffer.from([137,80,78,71,13,10,26,10,0,0,0,0]).toString('base64'), mimeType: 'image/png', providerId: 'openai', modelId: 'image', generationId: 'request1' };
 
+test('per-photo diagnostics distinguish decision, angle, variant and selected index without accepting contradictory checks', async () => {
+  let rows;
+  const result = await assessStudioSourceBatch({ ...input, references: Array(4).fill(input.references[0]), onSourceDiagnostics: async value => { rows = value; } }, async () => textResult({
+    ...sourceReview, supportedIndices: [1, 2, 3], imageChecks: [
+      { index: 1, approved: true, angleSupported: true, variantMatches: true, evidence: 'Eligible frontal' },
+      { index: 2, approved: false, angleSupported: true, variantMatches: true, evidence: 'Reviewer declined' },
+      { index: 3, approved: true, angleSupported: false, variantMatches: true, evidence: 'Wrong angle' },
+      { index: 4, approved: true, angleSupported: true, variantMatches: false, evidence: 'Other variant' },
+    ],
+  }));
+  assert.deepEqual(result.supportedIndices, [1]);
+  assert.deepEqual(rows.map(row => row.failedConditions), [[], ['reviewer_decision'], ['angle'], ['variant', 'index']]);
+  assert.ok(rows.every(row => row.decisionScope === 'IMAGE' && row.angleScope === 'IMAGE'));
+});
+
+test('omitted per-photo checks remain unknown and batch rejection is identified as batch scoped', async () => {
+  let rows;
+  await assessStudioSourceBatch({ ...input, onSourceDiagnostics: async value => { rows = value; } }, async () => textResult(sourceReview));
+  assert.equal(rows[0].reviewerDecision, null);
+  assert.equal(rows[0].angleSupported, null);
+  assert.equal(rows[0].variantMatches, null);
+  await assessStudioSourceBatch({ ...input, onSourceDiagnostics: async value => { rows = value; } }, async () => textResult({ ...sourceReview, approved: false, sourceSupportsAngle: false, supportedIndices: [] }));
+  assert.equal(rows[0].decisionScope, 'BATCH');
+  assert.equal(rows[0].angleScope, 'BATCH');
+  assert.deepEqual(rows[0].failedConditions, ['reviewer_decision', 'angle', 'index']);
+});
+
+test('diagnostics are retained before invalid index and variant mismatch throw', async () => {
+  for (const review of [{ ...sourceReview, supportedIndices: [2] }, { ...sourceReview, variantIdentity: 'other' }]) {
+    let rows;
+    await assert.rejects(assessStudioSourceBatch({ ...input, variantIdentity: sourceReview.variantIdentity,
+      onSourceDiagnostics: async value => { rows = value; } }, async () => textResult(review)));
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].supported, false);
+    assert.ok(rows[0].failedConditions.includes(review.supportedIndices[0] === 2 ? 'index' : 'variant'));
+  }
+});
+
 test('mixed source batch selects only individually supported images and preserves literal chosen variant', async () => {
   const variantIdentity = 'armação preta; lente fumê';
   const refs = ['https://ae01.alicdn.com/front.png', 'https://ae01.alicdn.com/other-color.png', 'https://ae01.alicdn.com/size-table.png'];

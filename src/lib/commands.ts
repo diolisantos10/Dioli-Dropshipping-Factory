@@ -251,6 +251,16 @@ export const COMMANDS: Record<string, Handler> = {
     checkpointStudioAssessment(s.media, str(i, 'requestId', 80), {
       angle: str(i, 'angle', 100), variantIdentity: str(i, 'variantIdentity', 500, false), processedSourceAssetIds: strings(i, 'processedSourceAssetIds', 2000),
       supportedSourceAssetIds: strings(i, 'supportedSourceAssetIds', 2000), evidence: strings(i, 'evidence', 200),
+      ...(Array.isArray(i.photoDiagnostics) ? { photoDiagnostics: i.photoDiagnostics.map(value => {
+        const raw = value && typeof value === 'object' ? value as Input : {};
+        const nullableBoolean = (key: string) => typeof raw[key] === 'boolean' ? raw[key] as boolean : null;
+        return { sourceAssetId: str(raw, 'sourceAssetId', 80), sourceIndex: num(raw, 'sourceIndex'), angle: str(raw, 'angle', 100),
+          reviewerDecision: nullableBoolean('reviewerDecision'), angleSupported: nullableBoolean('angleSupported'),
+          variantMatches: nullableBoolean('variantMatches'), indexSelected: nullableBoolean('indexSelected'),
+          indicesValid: raw.indicesValid === true, batchApproved: raw.batchApproved === true, batchSupportsAngle: raw.batchSupportsAngle === true,
+          decisionScope: oneOf(raw, 'decisionScope', ['IMAGE', 'BATCH'] as const), angleScope: oneOf(raw, 'angleScope', ['IMAGE', 'BATCH'] as const),
+          supported: raw.supported === true, failedConditions: strings(raw, 'failedConditions', 4), evidence: str(raw, 'evidence', 2000) };
+      }) } : {}),
     }, c.at) },
   'media.retryStudioInspection': { writes: 'media', reads: ['products', 'intake'], roles: always(['SYSTEM']), run: (s, i, c) => {
     const requestId = str(i, 'requestId', 80);

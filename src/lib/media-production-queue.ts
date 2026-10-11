@@ -93,9 +93,14 @@ export function checkpointStudioAssessment(state: MediaState, requestId: string,
   const processed = [...new Set(assessment.processedSourceAssetIds)];
   const supported = [...new Set(assessment.supportedSourceAssetIds)];
   if (!assessment.angle.trim() || processed.some(id => !request.sourceAssetIds.includes(id)) || supported.some(id => !processed.includes(id))) throw new Error('Análise contém referências inválidas para esta solicitação.');
+  if (assessment.photoDiagnostics?.some(item => !processed.includes(item.sourceAssetId) || item.angle !== assessment.angle
+    || item.sourceIndex !== request.sourceAssetIds.indexOf(item.sourceAssetId) + 1)) throw new Error('Diagnóstico contém referências inválidas para esta solicitação.');
   const previous = request.sourceAssessment?.angle === assessment.angle ? request.sourceAssessment : undefined;
   const priorIdentity = request.sourceAssessment?.variantIdentity ?? '';
   if (priorIdentity && assessment.variantIdentity && priorIdentity !== assessment.variantIdentity) throw new Error('Não é possível misturar variantes na mesma análise de referências.');
-  const sourceAssessment = { angle: assessment.angle, variantIdentity: assessment.variantIdentity || priorIdentity, processedSourceAssetIds: [...new Set([...(previous?.processedSourceAssetIds ?? []), ...processed])], supportedSourceAssetIds: [...new Set([...(previous?.supportedSourceAssetIds ?? []), ...supported])], evidence: [...new Set([...(previous?.evidence ?? []), ...assessment.evidence])].slice(-200) };
+  const photoDiagnostics = [...new Map([...(request.sourceAssessment?.photoDiagnostics ?? []), ...(assessment.photoDiagnostics ?? [])]
+    .map(item => [JSON.stringify([item.angle, item.sourceAssetId]), item])).values()];
+  const sourceAssessment = { angle: assessment.angle, variantIdentity: assessment.variantIdentity || priorIdentity, processedSourceAssetIds: [...new Set([...(previous?.processedSourceAssetIds ?? []), ...processed])], supportedSourceAssetIds: [...new Set([...(previous?.supportedSourceAssetIds ?? []), ...supported])], evidence: [...new Set([...(previous?.evidence ?? []), ...assessment.evidence])].slice(-200),
+    ...(photoDiagnostics.length ? { photoDiagnostics } : {}) };
   return { ...state, productionRequests: state.productionRequests?.map(item => item.id === requestId ? { ...item, sourceAssessment, updatedAt: at } : item) };
 }
