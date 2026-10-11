@@ -1,4 +1,5 @@
 import type { Candidate } from './intake';
+import { sameStoredValue } from './same-value.ts';
 import type { ProductCompletionRequest } from './product-completion-queue.ts';
 import { normalizeFiscal, normalizeVariantLogistics, type Availability, type ProductFiscal, type VariantLogistics } from './product-fiscal.ts';
 
@@ -95,7 +96,7 @@ export function refreshProductSupplier(state: ProductFactoryState, id: string, c
     existingIds.add(variantId);
     spec.variants.push({ ...variant, id: variantId });
   }
-  if (JSON.stringify(spec) === JSON.stringify(current.spec)) return state;
+  if (sameStoredValue(spec, current.spec)) return state;
   return updateProduct(state, id, { universalTitle: current.universalTitle, shortDescription: current.shortDescription,
     longDescription: current.longDescription, category: current.category, bullets: current.bullets, benefits: current.benefits, tags: current.tags, spec }, at, actor);
 }

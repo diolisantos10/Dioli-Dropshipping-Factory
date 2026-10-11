@@ -1,4 +1,5 @@
 import type { IntakeState } from './intake.ts';
+import { sameStoredValue } from './same-value.ts';
 import { refreshProductSupplier, type ProductFactoryState } from './product-factory.ts';
 
 export function storedVariantDiagnostic(intake: IntakeState, products: ProductFactoryState) {
@@ -29,7 +30,7 @@ export async function repairStoredVariantSchemas(intake: IntakeState, products: 
     if (skus.some(sku => !sku) || new Set(skus).size !== skus.length) continue;
     const preview = refreshProductSupplier(products, product.id, candidate, product.updatedAt, 'system:stored-variant-repair');
     const next = preview.products.find(item => item.id === product.id)!;
-    if (JSON.stringify(next.spec?.variants) === JSON.stringify(product.spec?.variants ?? [])) continue;
+    if (sameStoredValue(next.spec?.variants, product.spec?.variants ?? [])) continue;
     repairable++;
     if (repaired < limit) { await apply(product.id); repaired++; }
   }

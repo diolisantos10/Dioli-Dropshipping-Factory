@@ -12,6 +12,7 @@ import { supplierForImageReading } from './providers/supplier-stored.ts';
 import { parseDsProduct } from './providers/aliexpress.ts';
 import { enrichSupplierPage, SUPPLIER_PAGE_REVISION } from './providers/supplier-page.ts';
 import { repairStoredVariantSchemas } from './stored-variant-repair.ts';
+import { sameStoredValue } from './same-value.ts';
 import { generateGatewayText, GatewayError } from './ai-gateway';
 import { parseCommercialCopy } from './factory-production-rules';
 import { archiveSourceAllowed, persistSupplierOriginals } from './supplier-media-archive';
@@ -114,7 +115,7 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
     if (supplier.technicalReadFailure?.revision === SUPPLIER_VISION_REVISION) return { stage: 'TECHNICAL_DATA', blocked: 1, code: supplier.technicalReadFailure.code, mediaPaused: true };
     const reconciled = { ...supplier, specifications: resolveVisualAttributes(supplier), variants: (supplier.variants ?? []).map(variant => ({ ...variant,
       attributes: resolveVisualAttributes({ specifications: variant.attributes, visualAttributes: (supplier.visualAttributes ?? []).filter(item => item.sku === variant.sku).map(item => ({ ...item, sku: undefined })) }) })) };
-    if (JSON.stringify(reconciled.specifications) !== JSON.stringify(supplier.specifications) || JSON.stringify(reconciled.variants) !== JSON.stringify(supplier.variants)) {
+    if (!sameStoredValue(reconciled.specifications, supplier.specifications) || !sameStoredValue(reconciled.variants, supplier.variants)) {
       await runServerCommand('intake.refreshSupplier', { candidateId: candidate.id, supplier: reconciled }, identity);
       supplier = reconciled;
     }

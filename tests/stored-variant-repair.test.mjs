@@ -45,3 +45,12 @@ test('diagnostics distinguish archived, ready, active and orphan masters without
   assert.equal(report.archivedMissingVariants, 1); assert.equal(report.readyMissingVariants, 1); assert.equal(report.activeDraftMissingVariants, 2); assert.equal(report.orphanMasterCount, 1); assert.equal(report.orphanMastersWithSourceURL, 1);
   assert.ok(!JSON.stringify(report).includes(candidate.url)); assert.ok(!JSON.stringify(report).includes('SKU'));
 });
+
+test('JSONB object key reordering never causes repeated writes or versions', async () => {
+  const products = startProduct(emptyProductFactory, candidate, 'p', 'now');
+  const reverse = value => Array.isArray(value) ? value.map(reverse) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).reverse().map(([key, item]) => [key, reverse(item)])) : value;
+  const persisted = reverse(products);
+  const result = await repairStoredVariantSchemas({ candidates: [reverse(candidate)] }, persisted, async () => assert.fail('key order is not a data change'));
+  assert.equal(result.repaired, 0);
+  assert.equal(refreshProductSupplier(persisted, 'p', reverse(candidate), 'later', 'system:stored-variant-repair'), persisted);
+});
