@@ -7,9 +7,9 @@ import ts from 'typescript';
 const require = createRequire(import.meta.url);
 function load(deps = {}) {
   const code = ts.transpileModule(readFileSync(new URL('../src/lib/supplier-media-archive.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-  const module = { exports: {} };
-  new Script(`(function(require,module,exports){${code}\n})`).runInThisContext()(name => name.startsWith('node:') ? require(name) : deps[name] ?? {}, module, module.exports);
-  return module.exports;
+  const loadedModule = { exports: {} };
+  new Script(`(function(require,module,exports){${code}\n})`).runInThisContext()(name => name.startsWith('node:') ? require(name) : deps[name] ?? {}, loadedModule, loadedModule.exports);
+  return loadedModule.exports;
 }
 test('archive whitelist requires exact supplier CDN domain, HTTPS, no credentials or alternate ports', () => {
   const { archiveSourceAllowed, archiveHostClass } = load();
