@@ -169,7 +169,7 @@ function ProductDetail({ card, onClose, children }: { card: StoreCard; onClose: 
             {card.availability !== undefined || card.fiscalCompletion !== undefined ? <Info label="Disponibilidade" value={card.availability ? availabilityLabels[card.availability] : 'Sem definição'} /> : null}
             {card.fiscalCompletion !== undefined && <Info label="Cadastro fiscal" value={`${card.fiscalCompletion}% preenchido`} />}
           </dl>
-          {card.url && <a className="inline-block break-all text-sm underline" href={card.url} target="_blank" rel="noreferrer noopener">Abrir página de origem</a>}
+          {card.url && <a className="ddf-button secondary inline-flex" href={card.url} target="_blank" rel="noreferrer noopener">Abrir produto original no fornecedor ↗</a>}
           <section><h3 className="font-semibold">Descrição do produto</h3><p className="mt-2 whitespace-pre-wrap text-sm text-[var(--muted)]">{card.description || 'Não informada pelo fornecedor.'}</p></section>
           {card.sourceDetails && <SupplierInformation supplier={card.sourceDetails} />}
           <VariantDetails variants={card.variants} currency={card.currency} fromSource={card.variantsFromSource} />
@@ -184,7 +184,7 @@ function Info({ label, value }: { label: string; value: string }) {
   return <div className="rounded-lg bg-[var(--canvas)] p-3"><dt className="text-xs text-[var(--muted)]">{label}</dt><dd className="mt-1 font-semibold">{value}</dd></div>;
 }
 
-function SupplierInformation({ supplier }: { supplier: NonNullable<StoreCard['sourceDetails']> }) {
+export function SupplierInformation({ supplier }: { supplier: NonNullable<StoreCard['sourceDetails']> }) {
   const missing = 'Ainda não confirmado';
   const sourceNames = { title: 'Título', description: 'Descrição', specification: 'Ficha técnica', variant: 'Variação', image: 'Foto' };
   const facts = [...new Map([...(supplier.facts ?? []), ...(supplier.variants ?? []).flatMap(variant => variant.facts ?? [])].map(fact => [JSON.stringify(fact), fact])).values()];
@@ -196,7 +196,7 @@ function SupplierInformation({ supplier }: { supplier: NonNullable<StoreCard['so
   const conflicts = [...conflicting.values()].some(values => values.size > 1);
   const dimensions = (value: typeof supplier.dimensions) => value && Object.values(value).some(item => item !== undefined)
     ? [value.lengthCm, value.widthCm, value.heightCm].map(item => item === undefined ? '?' : item.toLocaleString('pt-BR')).join(' × ') + ' cm (C × L × A)' : missing;
-  return <section className="space-y-3">
+  return <section className="space-y-3" aria-label="Dados brutos do fornecedor">
     <h3 className="font-semibold">Dados brutos do fornecedor</h3>
     <p className="text-sm text-[var(--muted)]">{supplier.vision?.completed ? 'Leitura das fotos concluída.' : (supplier.images?.length ?? 0) ? `Leitura das fotos pendente: ${supplier.vision?.processedImages?.length ?? 0} de ${supplier.images?.length ?? 0} analisadas.` : 'Nenhuma foto disponível para leitura.'} Campos sem confirmação permanecem em aberto.</p>
     {conflicts && <p className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">Há medidas conflitantes nas fontes. Confira as evidências antes de concluir o cadastro.</p>}
@@ -217,6 +217,6 @@ function SupplierInformation({ supplier }: { supplier: NonNullable<StoreCard['so
     {facts.length > 0 && <details className="text-sm"><summary className="cursor-pointer font-semibold">Evidências das medidas ({facts.length})</summary><ul className="mt-2 max-h-80 space-y-2 overflow-y-auto">{facts.map((fact, index) => <li key={index} className="rounded border border-[var(--line)] p-2"><p className="text-xs text-[var(--muted)]">{sourceNames[fact.source]}{fact.sku ? ` · SKU ${fact.sku}` : ' · sem SKU específico'}</p><p className="whitespace-pre-wrap">{fact.excerpt}</p><p>{fact.value.toLocaleString('pt-BR')} {fact.unit}</p>{fact.imageUrl && <a className="underline" href={fact.imageUrl} target="_blank" rel="noopener noreferrer">Abrir foto de origem</a>}</li>)}</ul></details>}
     <h4 className="text-sm font-semibold">Especificações técnicas originais</h4>
     {Object.keys(supplier.specifications ?? {}).length ? <dl className="grid gap-2 sm:grid-cols-2">{Object.entries(supplier.specifications ?? {}).map(([key, value]) => <Info key={key} label={key} value={value} />)}</dl> : <p className="text-sm text-[var(--muted)]">{missing}</p>}
-    {supplier.rawData && <details className="text-sm"><summary className="cursor-pointer font-semibold">Ver todos os dados originais recebidos do AliExpress</summary><pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded bg-[var(--canvas)] p-3 text-xs">{JSON.stringify(supplier.rawData, null, 2)}</pre></details>}
+    {supplier.rawData && <details className="text-sm"><summary className="cursor-pointer font-semibold">Ver todos os dados originais recebidos do fornecedor</summary><pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded bg-[var(--canvas)] p-3 text-xs">{JSON.stringify(supplier.rawData, null, 2)}</pre></details>}
   </section>;
 }

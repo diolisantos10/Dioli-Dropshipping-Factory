@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ACTIVE_STATES, candidateCard, filterCards, parseLegacyNotes, productCard, suggestedPriceOf, suppliersOf } from '../src/lib/storefront.ts';
+import { ACTIVE_STATES, candidateCard, filterCards, masterVariantCards, parseLegacyNotes, productCard, suggestedPriceOf, suppliersOf } from '../src/lib/storefront.ts';
 import { assignProduct, catalogRecords, curateProducts, emptyCatalog, addSupplierOffer } from '../src/lib/catalog.ts';
 
 const candidate = (id, extra = {}) => ({ id, name: `Produto ${id}`, url: `https://www.aliexpress.com/item/${id}.html`, notes: '', status: 'CANDIDATO', createdAt: '2026-09-01T00:00:00Z', ...extra });
@@ -110,4 +110,19 @@ test('legacy master displays source variants explicitly without changing its sav
   const missing = productCard(record);
   assert.equal(missing.variantsFromSource, false);
   assert.deepEqual(missing.variants, []);
+});
+
+test('master variant photos match unique exact SKUs and never overwrite saved evidence or use another color', () => {
+  const product = { spec: { variants: [{ id: 'human', sku: 'black', title: 'Preto revisado', attributes: { Cor: 'Curadoria' }, weightGrams: null, dimensions: {} }, { id: 'unknown', sku: 'missing', title: 'Outra' }] } };
+  const source = [{ id: 'brown', sku: 'brown', imageUrl: 'https://fixture.invalid/brown.png', price: 4, stock: 2 }, { id: 'black', sku: 'black', imageUrl: 'https://fixture.invalid/black.png', price: 5, stock: 3 }];
+  const before = structuredClone(product);
+  const variants = masterVariantCards(product, source);
+  assert.equal(variants[0].imageUrl, source[1].imageUrl);
+  assert.equal(variants[0].price, 5);
+  assert.equal(variants[0].label, 'Preto revisado');
+  assert.deepEqual(variants[0].attributes, { Cor: 'Curadoria' });
+  assert.equal(variants[0].weightGrams, null);
+  assert.equal(variants[1].imageUrl, '');
+  assert.equal(masterVariantCards(product, [...source, { ...source[1], imageUrl: 'https://fixture.invalid/conflict.png' }])[0].imageUrl, '');
+  assert.deepEqual(product, before);
 });

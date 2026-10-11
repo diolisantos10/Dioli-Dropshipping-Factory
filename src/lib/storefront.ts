@@ -1,5 +1,6 @@
 // Storefront view model shared by Prateleira Bruta, Triagem and Disponíveis: every item becomes a
 // product card (photo, name, cost, suggested price, stock, supplier) with the same filters.
+import type { MasterProduct } from './product-factory.ts';
 import type { CatalogRecord, CurationStatus } from './catalog.ts';
 import type { Candidate, CandidateStatus, CandidateSupplier } from './intake.ts';
 import { approvedStudioMedia } from './media-factory.ts';
@@ -79,6 +80,18 @@ export function suggestedPriceOf(prices: PriceCalculation[]) {
   return best ? { price: best.suggestedPrice, currency: best.currency } : null;
 }
 
+/** Photos and commercial values require exactly one matching supplier SKU; never use list order or another variant. */
+export function masterVariantCards(product: MasterProduct, sourceVariants: CardVariant[] = []): CardVariant[] {
+  return (product.spec?.variants ?? []).map(item => {
+    const matches = item.sku?.trim() ? sourceVariants.filter(source => source.sku?.trim() === item.sku.trim()) : [];
+    const source = matches.length === 1 ? matches[0] : undefined;
+    return { id: item.id, label: item.title || item.sku,
+      detail: [`SKU ${item.sku}`, item.gtin && `GTIN ${item.gtin}`, ...Object.entries(item.attributes ?? {}).map(([key, value]) => `${key}: ${value}`)].filter(Boolean).join(' · '),
+      price: source?.price ?? null, stock: source?.stock ?? null, imageUrl: source?.imageUrl ?? '', sku: item.sku, gtin: item.gtin,
+      attributes: item.attributes, dimensions: item.dimensions, weightGrams: item.weightGrams };
+  });
+}
+
 export function productCard(record: CatalogRecord, candidate?: Candidate, curation?: CurationStatus): StoreCard {
   const product = record.product;
   const origin = candidate ? candidateCard(candidate) : null;
@@ -88,11 +101,7 @@ export function productCard(record: CatalogRecord, candidate?: Candidate, curati
   const cheapest = offers[0];
   const knownStock = offers.filter(item => item.stock !== null);
   const price = suggestedPriceOf(record.prices);
-  const variants = (product.spec?.variants ?? []).map(item => ({
-    id: item.id, label: item.title || item.sku,
-    detail: [`SKU ${item.sku}`, item.gtin && `GTIN ${item.gtin}`, ...Object.entries(item.attributes).map(([key, value]) => `${key}: ${value}`)].filter(Boolean).join(' · '),
-    price: null, stock: null, imageUrl: '', sku: item.sku, gtin: item.gtin, attributes: item.attributes, dimensions: item.dimensions, weightGrams: item.weightGrams,
-  }));
+  const variants = masterVariantCards(product, origin?.variants);
   const state = curation ?? 'PRONTO';
   const card: Omit<StoreCard, 'searchText'> = {
     id: product.id, title: product.universalTitle, fullTitle: product.universalTitle, imageUrl: images[0] ?? '', images,
@@ -103,6 +112,7 @@ export function productCard(record: CatalogRecord, candidate?: Candidate, curati
     state, stateLabel: curationLabels[state], category: product.category, url: origin?.url || product.spec?.sourceUrl || '',
     description: product.shortDescription || product.longDescription, variants: variants.length ? variants : origin?.variants ?? [],
     variantsFromSource: !variants.length && !!origin?.variants.length,
+    sourceDetails: origin?.sourceDetails,
     availability: product.availability, fiscalCompletion: fiscalCompletion(product), technicalGaps: productMissingTechnical(product),
   };
   const skus = (product.spec?.variants ?? []).map(item => `${item.sku} ${item.title}`);

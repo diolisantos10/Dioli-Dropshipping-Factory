@@ -7,8 +7,8 @@ const child = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'start
 let output = ''; child.stdout.on('data', data => output += data); child.stderr.on('data', data => output += data);
 const auth = `Basic ${Buffer.from('interface-test:local-variant-test-password').toString('base64')}`;
 let browser;
-const sourceVariant = { sku: 'SKU-PRETO', label: 'Preto / lente cinza', price: 19, stock: 3, attributes: { Cor: 'Preto', 'Detalhe completo': 'Atributo longo preservado até o fim da informação' }, dimensions: { lengthCm: 14.6, widthCm: 14, heightCm: 3.2 }, weightGrams: 22.6 };
-const supplier = { name: 'Fornecedor teste', ref: '1005013226256365', cost: 19, currency: 'BRL', stock: 3, imageUrl: '', images: [], variants: [sourceVariant] };
+const sourceVariant = { sku: 'SKU-PRETO', label: 'Preto / lente cinza', imageUrl: 'https://fixture.invalid/variant-black.png', price: 19, stock: 3, attributes: { Cor: 'Preto', 'Detalhe completo': 'Atributo longo preservado até o fim da informação' }, dimensions: { lengthCm: 14.6, widthCm: 14, heightCm: 3.2 }, weightGrams: 22.6 };
+const supplier = { name: 'Fornecedor teste', ref: '1005013226256365', cost: 19, currency: 'BRL', stock: 3, imageUrl: '', images: [], specifications: { 'Proteção declarada': 'UV400' }, variants: [sourceVariant] };
 const candidate = (id, status) => ({ id, name: `Óculos ${id}`, url: 'https://www.aliexpress.com/item/1005013226256365.html', notes: '', status, createdAt: '2026-10-11', supplier });
 const spec = { variants: [{ ...sourceVariant, id: 'v1', title: sourceVariant.label, gtin: '' }], materials: ['PC'], colors: [], sizes: [], seo: { title: '', description: '' }, compliance: { notes: '', certifications: [] }, localizations: {}, destinationGaps: {} };
 const product = (id, status) => ({ id, candidateId: 'raw', universalTitle: `Óculos ${id}`, shortDescription: 'Óculos', longDescription: 'Descrição', category: 'Óculos', bullets: [], benefits: [], tags: [], status, version: 1, createdAt: '2026-10-11', updatedAt: '2026-10-11', spec });
@@ -29,6 +29,11 @@ try {
     await section.getByText('SKU: SKU-PRETO', { exact: true }).waitFor();
     await section.getByText('Atributo longo preservado até o fim da informação', { exact: true }).waitFor();
     await section.getByText('22,6 g', { exact: true }).waitFor();
+    assert.equal(await section.getByRole('img').getAttribute('src'), sourceVariant.imageUrl, path);
+    await page.getByRole('region', { name: 'Dados brutos do fornecedor', exact: true }).getByText('UV400', { exact: true }).waitFor();
+    if (path === '/product-factory') {
+      assert.equal(await page.getByRole('link', { name: 'Abrir produto original no fornecedor ↗', exact: true }).getAttribute('href'), candidate('raw', 'CANDIDATO').url);
+    }
     assert.ok((await section.innerText()).includes('14,6 cm × 14 cm × 3,2 cm'), path);
     await page.getByRole('button', { name: 'Fechar', exact: true }).click();
   }
@@ -44,6 +49,8 @@ try {
   const originSection = page.getByRole('region', { name: 'Ficha das variantes', exact: true });
   await originSection.getByText('Variantes registradas na origem (1)', { exact: true }).waitFor();
   await originSection.getByText('SKU: SKU-PRETO', { exact: true }).waitFor();
+  assert.equal(await originSection.getByRole('img').getAttribute('src'), sourceVariant.imageUrl);
+  assert.equal(await page.getByRole('link', { name: 'Abrir produto original no fornecedor ↗', exact: true }).getAttribute('href'), candidate('raw', 'CANDIDATO').url);
   await originSection.getByText('Atributo longo preservado até o fim da informação', { exact: true }).waitFor();
   assert.ok((await originSection.innerText()).includes('ainda não constam na versão salva da ficha'));
   assert.equal(states.products.products.find(item => item.id === 'legacy-ready').spec.variants.length, 0);
