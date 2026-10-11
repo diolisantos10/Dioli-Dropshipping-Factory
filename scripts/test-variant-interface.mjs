@@ -33,7 +33,14 @@ try {
     await page.getByRole('button', { name: 'Fechar', exact: true }).click();
   }
   await page.goto(base + '/product-factory');
+  assert.ok((await page.getByRole('button', { name: 'Abrir Óculos legacy-ready', exact: true }).innerText()).includes('Revisão pendente'));
+  assert.ok((await page.getByRole('button', { name: 'Abrir Óculos ready', exact: true }).innerText()).includes('Pronto'));
+  await page.getByRole('button', { name: 'Abrir Óculos draft', exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: 'Marcar como pronto', exact: true }).isEnabled(), false);
+  await page.getByRole('button', { name: 'Fechar', exact: true }).click();
   await page.getByRole('button', { name: 'Abrir Óculos legacy-ready', exact: true }).click();
+  await page.getByRole('dialog').getByText('Revisão pendente', { exact: true }).waitFor();
+  await page.getByText('Ele permanece fora de Produtos Disponíveis até cumprir os critérios.', { exact: false }).waitFor();
   const originSection = page.getByRole('region', { name: 'Ficha das variantes', exact: true });
   await originSection.getByText('Variantes registradas na origem (1)', { exact: true }).waitFor();
   await originSection.getByText('SKU: SKU-PRETO', { exact: true }).waitFor();
@@ -41,6 +48,9 @@ try {
   assert.ok((await originSection.innerText()).includes('ainda não constam na versão salva da ficha'));
   assert.equal(states.products.products.find(item => item.id === 'legacy-ready').spec.variants.length, 0);
   await page.getByRole('button', { name: 'Fechar', exact: true }).click();
+  await page.goto(base + '/disponiveis');
+  assert.equal(await page.getByRole('button', { name: 'Abrir detalhes de Óculos legacy-ready', exact: true }).count(), 0);
+  await page.getByRole('button', { name: 'Abrir detalhes de Óculos ready', exact: true }).waitFor();
   await page.goto(base + '/prateleira-bruta');
   await page.getByRole('button', { name: 'Abrir detalhes de Óculos legacy', exact: true }).click();
   await page.getByText('Variantes ainda não registradas nesta ficha.', { exact: false }).waitFor();
