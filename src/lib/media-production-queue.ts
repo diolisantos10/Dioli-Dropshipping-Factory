@@ -2,6 +2,27 @@ import type { IntakeState } from './intake.ts';
 import type { ProductFactoryState } from './product-factory.ts';
 import { addMedia, reviewMedia, ingestSupplierOriginals, studioReadiness, type MediaAsset, type MediaState, type MediaProductionRequest } from './media-factory.ts';
 
+export const STUDIO_SOURCE_SELECTION_REPAIR = 'studio-source-selection-repair-1';
+export function canRetryStudioInspection(state: MediaState, requestId: string, revision: string) {
+  const request = state.productionRequests?.find(item => item.id === requestId);
+  if (!request || revision !== STUDIO_SOURCE_SELECTION_REPAIR || request.status !== 'FALHOU' || request.inspectionRetryHistory?.length
+    || request.error !== 'Produção não concluída (studio_missing_references); nenhuma foto foi presumida aprovada.'
+    || !request.sourceAssetIds.length || !request.sourceAssessment || request.sourceAssessment.supportedSourceAssetIds.length
+    || request.sourceAssessment.variantIdentity.trim()) return false;
+  const refs = new Set(request.sourceAssetIds), processed = new Set(request.sourceAssessment.processedSourceAssetIds);
+  if (refs.size !== processed.size || [...refs].some(id => !processed.has(id))) return false;
+  if ([...refs].some(id => !state.assets.some(asset => asset.id === id && asset.productId === request.productId && asset.kind === 'ORIGINAL' && asset.status === 'APROVADA'))) return false;
+  return !state.assets.some(asset => asset.productId === request.productId && asset.kind === 'DERIVADA' && asset.studio);
+}
+/** Reviewed technical inspection repair only, before any generated studio image. History is retained. */
+export function retryStudioInspection(state: MediaState, requestId: string, revision: string, at: string, actor: string): MediaState {
+  if (!canRetryStudioInspection(state, requestId, revision)) throw new Error('A solicitação não aceita esta única revisão técnica da seleção de fontes.');
+  return { ...state, productionRequests: state.productionRequests?.map(request => request.id !== requestId ? request : {
+    ...request, status: 'PENDENTE', updatedAt: at, error: undefined, sourceAssessment: undefined,
+    inspectionRetryHistory: [{ revision, at, actor, assessment: structuredClone(request.sourceAssessment!), error: request.error! }],
+  }) };
+}
+
 /** A handoff is persisted work, never an approval of the product or generated images. */
 export function bulkSendToMedia(state: MediaState, products: ProductFactoryState, intake: IntakeState, productIds: string[], newId: () => string, at: string, actor: string): MediaState {
   let next = state;
@@ -24,6 +45,7 @@ export function bulkSendToMedia(state: MediaState, products: ProductFactoryState
       id: existing?.id ?? newId(), productId, status: sourceAssetIds.length ? 'PENDENTE' : 'BLOQUEADO',
       requestedAt: at, requestedBy: actor, updatedAt: at, sourceAssetIds, requiredCount: 4,
       sourceAssessment: existing?.sourceAssessment,
+      inspectionRetryHistory: existing?.inspectionRetryHistory,
       error: sourceAssetIds.length ? undefined : 'Produto sem imagens originais do fornecedor; aguardando importação.',
     };
     next = { ...next, productionRequests: [request, ...(next.productionRequests ?? []).filter(item => item.productId !== productId)] };

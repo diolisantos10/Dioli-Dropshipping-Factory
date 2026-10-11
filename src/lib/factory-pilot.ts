@@ -11,6 +11,7 @@ import { generateGatewayText, GatewayError } from './ai-gateway';
 import { parseCommercialCopy } from './factory-production-rules';
 import { archiveSourceAllowed, persistSupplierOriginals } from './supplier-media-archive';
 import { runStudioProduction } from './studio-worker';
+import { canRetryStudioInspection, STUDIO_SOURCE_SELECTION_REPAIR } from './media-production-queue.ts';
 
 type Connection = { id: string; name: string };
 type PilotCheckpoint = { candidateId?: string; productId?: string; stage?: string; code?: string; failed?: boolean; editorial?: boolean; retryRevision?: string; sourceCount?: number; sourceRead?: number; studio?: { results?: { code?: unknown }[] } };
@@ -75,11 +76,24 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
       approvedPhotos = approvedStudioAssets(media, prior.productId).length;
       referenceSummary = pilotStudioReferenceSummary(media, prior.productId);
       gaps = product ? productGaps(product).filter(gap => SAFE_GAPS.has(gap)) : [];
+      const request = media.productionRequests?.find(item => item.productId === prior.productId);
+      const references = pilotStudioReferenceSummary(media, prior.productId);
+      if (retryRevision === STUDIO_SOURCE_SELECTION_REPAIR && code === 'studio_missing_references' && request
+        && references.allowedReferenceCount === references.requestReferenceCount && canRetryStudioInspection(media, request.id, retryRevision)) {
+        // Audited command consumes the only repair revision and retains the old assessment.
+        await runServerCommand('media.retryStudioInspection', { requestId: request.id, revision: retryRevision }, { role: 'SYSTEM', actor: 'system:factory-pilot:reviewed-inspection-repair', correlationId });
+        prior.failed = false;
+        delete prior.code;
+        prior.retryRevision = retryRevision;
+        await db.query(`UPDATE factory_production_runs SET detail=$2,status='PROCESSING',updated_at=now() WHERE candidate_id=$1`, [key, JSON.stringify({ ...prior, failed: true, code: 'pilot_operator_retry_interrupted' })]);
+      }
     }
+    if (prior.failed) {
     const summary = { blocked: 1, stage: prior.stage, code: code ?? 'pilot_failed_requires_review', sourceCount: prior.sourceCount ?? 0, sourceRead: prior.sourceRead ?? 0,
       approvedPhotos, gapCount: gaps.length, gaps, ...referenceSummary, reason: 'pilot_failed_requires_review' };
     console.info('DDF_FACTORY_PILOT', JSON.stringify({ status: 'BLOCKED', stage: summary.stage, code: summary.code, sourceCount: summary.sourceCount, sourceRead: summary.sourceRead, approvedPhotos, gapCount: gaps.length, gaps, ...referenceSummary }));
     return summary;
+    }
   }
   const checkpoint: PilotCheckpoint = { ...prior };
   if (sourceRetry) {

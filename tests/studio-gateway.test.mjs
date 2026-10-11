@@ -1,12 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generateReviewedStudioImage } from '../src/lib/studio-gateway.ts';
+import { assessStudioSourceBatch, generateReviewedStudioImage } from '../src/lib/studio-gateway.ts';
 import { generateGatewayImage, generateGatewayText, validGatewayReference } from '../src/lib/ai-gateway.ts';
 const input = { productId: 'p1', title: 'Óculos preto', angle: 'frontal', references: ['https://ae01.alicdn.com/front.png'], correlationId: 'c1' };
 const textResult = text => ({ text: JSON.stringify(text), providerId: 'openai', modelId: 'review', tier: 'primario', provenance: {} });
 const sourceReview = { approved:true, sourceSupportsAngle:true, variantIdentity:'armação preta', supportedIndices:[1], evidence:'Frontal preto visível' };
 const finalReview = { approved:true, sourceSupportsAngle:true, neutralBackground:true, square:true, noPeople:true, hyperrealistic:true, geometryUnchanged:true, evidence:'Produto idêntico, imagem quadrada e hiper-realista sem pessoas' };
 const image = { base64: Buffer.from([137,80,78,71,13,10,26,10,0,0,0,0]).toString('base64'), mimeType: 'image/png', providerId: 'openai', modelId: 'image', generationId: 'request1' };
+
+test('mixed source batch selects only individually supported images and preserves literal chosen variant', async () => {
+  const variantIdentity = 'armação preta; lente fumê';
+  const refs = ['https://ae01.alicdn.com/front.png', 'https://ae01.alicdn.com/other-color.png', 'https://ae01.alicdn.com/size-table.png'];
+  const result = await assessStudioSourceBatch({ ...input, references: refs, variantIdentity }, async request => {
+    assert.deepEqual(request.referenceImages, refs);
+    assert.equal(JSON.parse(request.prompt).selectedVariantIdentity, variantIdentity);
+    return textResult({ approved: true, sourceSupportsAngle: true, variantIdentity, supportedIndices: [1], evidence: 'Só a primeira imagem mostra esta variante de frente.' });
+  });
+  assert.deepEqual(result.supportedIndices, [1]); assert.equal(result.variantIdentity, variantIdentity);
+  await assert.rejects(assessStudioSourceBatch({ ...input, variantIdentity }, async () => textResult({ ...sourceReview, variantIdentity: 'outra variante' })), error => error.code === 'studio_variant_mismatch');
+});
 
 test('fonte não mostra ângulo: bloqueia antes de pagar geração', async () => {
   let generated = 0;
