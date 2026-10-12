@@ -23,7 +23,7 @@ import { runStudioProduction } from './studio-worker';
 import { canRetryStudioInspection, PILOT_FIVE_REFERENCE_REVISION, STUDIO_SOURCE_SELECTION_REPAIR, STUDIO_EMPTY_VARIANT_REPAIR, STUDIO_ARCHIVED_WEBP_REPAIR } from './media-production-queue.ts';
 
 type Connection = { id: string; name: string };
-type PilotCheckpoint = { candidateId?: string; productId?: string; stage?: string; code?: string; failed?: boolean; editorial?: boolean; retryRevision?: string; sourceCount?: number; sourceRead?: number; sourceStep?: string; sourceAttemptUrls?: string[]; sourceDiagnostic?: ReturnType<typeof sourceDiagnostic>; sourceResponse?: { text: string; providerId: string; modelId: string }; sourceProbeCompleted?: boolean; sourceFailureHistory?: Record<string, unknown>[]; referenceSetRevision?: string; referenceSetStartedAt?: string; referenceUrls?: string[]; referenceSourceCompleted?: boolean; studio?: { results?: { code?: unknown }[] } };
+type PilotCheckpoint = { singlePhotoPreflightRepair?: string; singlePhotoPreflightFailure?: Record<string, unknown>; candidateId?: string; productId?: string; stage?: string; code?: string; failed?: boolean; editorial?: boolean; retryRevision?: string; sourceCount?: number; sourceRead?: number; sourceStep?: string; sourceAttemptUrls?: string[]; sourceDiagnostic?: ReturnType<typeof sourceDiagnostic>; sourceResponse?: { text: string; providerId: string; modelId: string }; sourceProbeCompleted?: boolean; sourceFailureHistory?: Record<string, unknown>[]; referenceSetRevision?: string; referenceSetStartedAt?: string; referenceUrls?: string[]; referenceSourceCompleted?: boolean; studio?: { results?: { code?: unknown }[] } };
 const SAFE_GAPS = new Set(['Título universal', 'Categoria', 'Descrição curta', 'Descrição longa', 'Material', 'Peso confirmado de cada item', 'Dimensões confirmadas de cada item']);
 export function technicalEvidenceCounts(supplier: CandidateSupplier) {
   const evidence = supplier.visualAttributes ?? [];
@@ -236,9 +236,24 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
       if (request && process.env.DDF_PILOT_SINGLE_PHOTO_TRIAL === SINGLE_PHOTO_TRIAL_REVISION) {
         console.info('DDF_STUDIO_SINGLE_PHOTO_PREFLIGHT', JSON.stringify({
           ...singlePhotoTrialPreflight(media, request.id), candidateApproved: recordedCandidate?.status === 'APROVADO',
+          productInProduction: product?.status === 'EM_PRODUCAO', productArchived: !!product?.archivedAt,
           configuredOnePhotoLimit: process.env.DDF_PILOT_MAX_APPROVED_PHOTOS === '1',
           configuredPilotMatches: process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID === recordedCandidate?.supplier?.ref }));
       }
+
+      if (request && prior.code === 'pilot_step_failed' && process.env.DDF_PILOT_SINGLE_PHOTO_TRIAL === SINGLE_PHOTO_TRIAL_REVISION
+        && prior.singlePhotoPreflightRepair !== 'one-photo-preflight-technical-1'
+        && !request.singlePhotoTrialHistory?.length) {
+        // A local setup exception occurred BEFORE any new paid image or consumed authorization.
+        // Retain it, permit exactly one technical replay, and log any repeated setup exception safely.
+        prior.singlePhotoPreflightFailure = { stage: prior.stage, code: prior.code, at: new Date().toISOString() };
+        prior.singlePhotoPreflightRepair = 'one-photo-preflight-technical-1';
+        prior.failed = false;
+        delete prior.code;
+        await db.query('UPDATE factory_production_runs SET detail=$2,status=\'PROCESSING\',updated_at=now() WHERE candidate_id=$1',
+          [key, JSON.stringify(prior)]);
+      }
+
       const references = pilotStudioReferenceSummary(media, prior.productId);
       if ((retryRevision === STUDIO_SOURCE_SELECTION_REPAIR && code === 'studio_missing_references'
         || [STUDIO_EMPTY_VARIANT_REPAIR, STUDIO_ARCHIVED_WEBP_REPAIR].includes(retryRevision ?? '') && code === 'studio_unsupported_view') && request
@@ -446,6 +461,24 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
   } catch (error) {
     checkpoint.failed = true;
     checkpoint.code = pilotErrorCode(error);
+    if (checkpoint.stage === 'STUDIO' && process.env.DDF_PILOT_SINGLE_PHOTO_TRIAL === SINGLE_PHOTO_TRIAL_REVISION) {
+      const message = error instanceof Error ? error.message : '';
+      const labels: Record<string, string> = {
+        'Teste de uma foto não elegível ou já consumido.': 'trial_ineligible',
+        'Teste exige somente resultados anteriores rejeitados, preservados.': 'prior_results_not_only_rejected',
+        'Teste único não autorizado para este piloto.': 'trial_command_not_authorized',
+        'Produto mestre não encontrado.': 'master_product_missing',
+        'Produto arquivado não pode receber novas mídias.': 'product_archived',
+        'Mídia nova só pode ser registrada para produtos em produção.': 'product_not_in_production',
+        'Solicitação não encontrada.': 'request_missing',
+      };
+      const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+      console.info('DDF_STUDIO_TRIAL_SETUP_EXCEPTION', JSON.stringify({
+        cause: labels[message] ?? 'other_local_exception',
+        exceptionType: error instanceof Error && ['Error', 'CommandError', 'TypeError', 'ReferenceError'].includes(error.name) ? error.name : 'unknown',
+        databaseCode: /^[0-9A-Z]{5}$/.test(code) ? code : null }));
+    }
+
     if (checkpoint.stage === 'SOURCE') {
       const secrets = Object.entries(process.env).filter(([key]) => /TOKEN|SECRET|PASSWORD|DATABASE_URL|CREDENTIALS_KEY|APP_KEY/.test(key)).map(([, value]) => value ?? '');
       checkpoint.sourceDiagnostic = sourceDiagnostic(error, checkpoint.sourceAttemptUrls ?? [], checkpoint.sourceStep ?? 'source_setup', secrets);
