@@ -99,9 +99,14 @@ export async function runStudioProduction(correlationId: string, targetProductId
         asset: { productId: product.id, url: `${publicOrigin}/api/media?id=${id}`, kind: 'DERIVADA', originalAssetId: selectedSources[0]!.id,
           sourceAssetIds: selectedSources.map(item => item!.id), purpose: `Estúdio ${angle}`, provenance: `Control Room ${result.image.providerId}/${result.image.modelId}`,
           transformationNotes: `Todas as ${sources.length} fotos originais inspecionadas; ${selectedSources.length} referências comprovadas da mesma variante usadas neste ângulo. Hiper-realismo 1:1 sem modelos, dimensões/formato/lentes/hastes/textura/cor/proporções preservados; revisão visual independente.`, studioAngle: angle,
-          fidelityEvidence: `${result.evidence} Revisão: ${result.reviewer.providerId}/${result.reviewer.modelId}`, generationProvider: result.image.providerId, generationId: result.image.generationId,
+          studioReviewChecks: result.checks, fidelityEvidence: `${result.evidence} Revisão: ${result.reviewer.providerId}/${result.reviewer.modelId}`, generationProvider: result.image.providerId, generationId: result.image.generationId,
           mimeType: result.image.mimeType, checksum, bytes: content.length, changesProductAppearance: !result.approved, rightsStatus: 'DECLARADO', format: jpeg ? 'JPEG' : 'PNG', aspectRatio: '1:1' } }, { ...identity, correlationId });
       const next = stored.payload as MediaState;
+      console.info('DDF_STUDIO_OUTPUT', JSON.stringify({ generated: 1, approved: result.approved, angle,
+        url: `${publicOrigin}/api/media?id=${id}`, filename: `studio-${product.id}-${angle}.${jpeg ? 'jpg' : 'png'}`,
+        mimeType: result.image.mimeType, bytes: content.length, checksum, recordedAt: new Date().toISOString(),
+        checks: result.checks, unreportedCriteria: result.unreportedCriteria }));
+
       await runServerCommand('media.updateProductionRequest', { requestId: request.id, status: result.approved ? studioReadiness(next, product.id).ready ? 'CONCLUIDO' : 'PENDENTE' : 'BLOQUEADO',
         ...(result.approved ? {} : { error: 'Revisão visual recusou a fidelidade; imagem preservada no histórico para conferência.' }) }, { ...identity, correlationId });
       return { checked: 1, generated: 1, approved: result.approved ? 1 : 0, angle };

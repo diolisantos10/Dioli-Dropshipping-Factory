@@ -14,6 +14,7 @@ export type MediaAsset = {
   rightsExpiresAt?: string; transformationNotes?: string; changesProductAppearance?: boolean;
   studio?: boolean; studioAngle?: string; sourceAssetIds?: string[]; fidelityVerified?: boolean;
   fidelityEvidence?: string; generationProvider?: string; generationId?: string;
+  studioReviewChecks?: Record<string, boolean>;
   removedAt?: string; removedBy?: string; removalReason?: string;
 };
 export type TransformationJob = {
@@ -25,6 +26,7 @@ export type MediaProductionRequest = {
   id: string; productId: string; status: 'PENDENTE' | 'PROCESSANDO' | 'CONCLUIDO' | 'BLOQUEADO' | 'FALHOU';
   requestedAt: string; requestedBy: string; updatedAt: string; sourceAssetIds: string[];
   requiredCount: 4; error?: string;
+  singlePhotoTrialHistory?: { revision: string; at: string; actor: string; previousStatus: string; previousError: string; previousAssessment: NonNullable<MediaProductionRequest['sourceAssessment']>; previousDerivedAssetIds: string[] }[];
   sourceAssessment?: { angle: string; variantIdentity: string; processedSourceAssetIds: string[]; supportedSourceAssetIds: string[]; evidence: string[];
     photoDiagnostics?: (Omit<import('./studio-gateway').StudioSourceDiagnostic, 'index'> & { sourceAssetId: string; sourceIndex: number; angle: string })[] };
   inspectionRetryHistory?: { revision: string; at: string; actor: string; assessment: NonNullable<MediaProductionRequest['sourceAssessment']>; error: string }[];

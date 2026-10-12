@@ -14,6 +14,7 @@ import { enrichSupplierPage, SUPPLIER_PAGE_REVISION } from './providers/supplier
 import { repairStoredVariantSchemas } from './stored-variant-repair.ts';
 import { sameStoredValue } from './same-value.ts';
 import { sourceDiagnostic } from './pilot-source-diagnostic.ts';
+import { SINGLE_PHOTO_TRIAL_REVISION } from './studio-one-photo-trial.ts';
 import { storedStudioOutcome } from './studio-outcome-diagnostic.ts';
 import { generateGatewayText, GatewayError } from './ai-gateway';
 import { parseCommercialCopy } from './factory-production-rules';
@@ -404,6 +405,14 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
         const selectedIds = (checkpoint.referenceUrls ?? []).map(url => mediaForQueue.assets.find(asset => asset.productId === product!.id
           && asset.kind === 'ORIGINAL' && (asset.sourceUrl === url || asset.url === url))?.id).filter((id): id is string => !!id);
         await command('media.restartPilotReferenceSet', { requestId: queue.id, sourceAssetIds: selectedIds, revision: referenceRevision }, true);
+        mediaForQueue = await loadMedia();
+        queue = mediaForQueue.productionRequests?.find(item => item.productId === product!.id);
+      }
+      if (queue?.status === 'BLOQUEADO' && process.env.DDF_PILOT_SINGLE_PHOTO_TRIAL === SINGLE_PHOTO_TRIAL_REVISION
+        && !queue.singlePhotoTrialHistory?.some(item => item.revision === SINGLE_PHOTO_TRIAL_REVISION)) {
+        await command('media.authorizeSinglePhotoTrial', { requestId: queue.id, revision: SINGLE_PHOTO_TRIAL_REVISION }, true);
+        console.info('DDF_STUDIO_SINGLE_PHOTO_AUTHORIZATION', JSON.stringify({ revision: SINGLE_PHOTO_TRIAL_REVISION,
+          authorizedImages: 1, previousResultsPreserved: true, authorizedAt: new Date().toISOString() }));
         mediaForQueue = await loadMedia();
         queue = mediaForQueue.productionRequests?.find(item => item.productId === product!.id);
       }

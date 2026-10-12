@@ -7,6 +7,7 @@ import { archiveProducts, emptyProductFactory, markProductReady, refreshProductS
 import type { Availability, ProductFiscal, VariantLogistics } from './product-fiscal.ts';
 import { addMedia, completeTransformation, emptyMedia, enqueueTransformation, ingestSupplierOriginals, studioReadiness, reviewMedia, updateTransformationJob, type MediaAsset, type MediaState, type TransformationJob } from './media-factory.ts';
 import { bulkSendToMedia, checkpointStudioAssessment, PILOT_FIVE_REFERENCE_REVISION, recordMediaProductionResult, restartPilotReferenceSet, retryStudioInspection, updateMediaProductionRequest } from './media-production-queue.ts';
+import { authorizeSinglePhotoTrial, SINGLE_PHOTO_TRIAL_REVISION } from './studio-one-photo-trial.ts';
 import { requestProductCompletion, updateCompletionRequest } from './product-completion-queue.ts';
 import { approvePrice, calculatePrice, emptyPricing, recalculateSupplierCost, releaseQuarantine, type PricingInput, type PricingState } from './pricing.ts';
 import { advanceOrder, emptyOrders, flagOrderException, purgeExpiredOrderData, receiveOrder, resolveOrderException, type ExceptionCategory, type ExceptionResolution, type OrderState, type OrderStatus } from './orders.ts';
@@ -283,12 +284,25 @@ export const COMMANDS: Record<string, Handler> = {
     if (revision !== PILOT_FIVE_REFERENCE_REVISION) throw new CommandError('Revisão de referências não autorizada.', 403);
     return restartPilotReferenceSet(s.media, requestId, ids(i, 'sourceAssetIds'), revision, c.at, c.actor);
   } },
+  'media.authorizeSinglePhotoTrial': { writes: 'media', reads: ['products', 'intake'], roles: always(['SYSTEM']), run: (s, i, c) => {
+    const requestId = str(i, 'requestId', 80);
+    const request = s.media.productionRequests?.find(item => item.id === requestId);
+    if (!request) throw new CommandError('Solicitação não encontrada.', 404);
+    const product = productInProduction(s, request.productId);
+    const candidate = s.intake.candidates.find(item => item.id === product.candidateId);
+    const revision = str(i, 'revision', 80);
+    if (candidate?.status !== 'APROVADO' || candidate?.supplier?.ref !== '1005013226256365' || process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID !== candidate.supplier.ref
+      || process.env.DDF_PILOT_SINGLE_PHOTO_TRIAL !== SINGLE_PHOTO_TRIAL_REVISION || revision !== SINGLE_PHOTO_TRIAL_REVISION
+      || process.env.DDF_PILOT_MAX_APPROVED_PHOTOS !== '1') throw new CommandError('Teste único não autorizado para este piloto.', 403);
+    return authorizeSinglePhotoTrial(s.media, requestId, revision, c.at, c.actor);
+  } },
   'media.recordStudioResult': { writes: 'media', reads: ['products'], roles: always(['SYSTEM']), run: (s, i, c) => {
     if (typeof i.approved !== 'boolean') throw new CommandError('Informe o resultado da revisão visual.');
     const raw = obj(i, 'asset');
     productInProduction(s, str(raw, 'productId', 80));
     return recordMediaProductionResult(s.media, str(i, 'requestId', 80), {
       ...mediaAssetInput(raw), studioAngle: str(raw, 'studioAngle', 100), fidelityEvidence: str(raw, 'fidelityEvidence', 2000),
+      studioReviewChecks: raw.studioReviewChecks && typeof raw.studioReviewChecks === 'object' ? Object.fromEntries(Object.entries(raw.studioReviewChecks).filter(([key, value]) => ['approved', 'sourceSupportsAngle', 'neutralBackground', 'square', 'noPeople', 'hyperrealistic', 'geometryUnchanged'].includes(key) && typeof value === 'boolean')) as Record<string, boolean> : undefined,
       generationProvider: str(raw, 'generationProvider', 100), generationId: str(raw, 'generationId', 200), sourceAssetIds: strings(raw, 'sourceAssetIds', 16),
     }, i.approved, c.newId(), c.at);
   } },
