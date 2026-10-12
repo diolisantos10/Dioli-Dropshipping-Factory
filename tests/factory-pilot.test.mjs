@@ -4,12 +4,13 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { Script } from 'node:vm';
 import ts from 'typescript';
+import * as onePhotoTrial from '../src/lib/studio-one-photo-trial.ts';
 import { storedStudioOutcome } from '../src/lib/studio-outcome-diagnostic.ts';
 const require = createRequire(import.meta.url);
 function load(deps) {
   const code = ts.transpileModule(readFileSync(new URL('../src/lib/factory-pilot.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const loadedModule = { exports: {} };
-  new Script(`(function(require,module,exports){${code}\n})`).runInThisContext()(name => name.startsWith('node:') ? require(name) : deps[name] ?? (name === './studio-outcome-diagnostic.ts' ? { storedStudioOutcome } : {}), loadedModule, loadedModule.exports);
+  new Script(`(function(require,module,exports){${code}\n})`).runInThisContext()(name => name.startsWith('node:') ? require(name) : deps[name] ?? (name === './studio-outcome-diagnostic.ts' ? { storedStudioOutcome } : name === './studio-one-photo-trial.ts' ? onePhotoTrial : {}), loadedModule, loadedModule.exports);
   return loadedModule.exports;
 }
 function fixture(t, { candidate, prior } = {}) {
