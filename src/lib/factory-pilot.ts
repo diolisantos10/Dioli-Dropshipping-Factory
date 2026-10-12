@@ -18,10 +18,10 @@ import { generateGatewayText, GatewayError } from './ai-gateway';
 import { parseCommercialCopy } from './factory-production-rules';
 import { archiveSourceAllowed, persistSupplierOriginals } from './supplier-media-archive';
 import { runStudioProduction } from './studio-worker';
-import { canRetryStudioInspection, STUDIO_SOURCE_SELECTION_REPAIR, STUDIO_EMPTY_VARIANT_REPAIR, STUDIO_ARCHIVED_WEBP_REPAIR } from './media-production-queue.ts';
+import { canRetryStudioInspection, PILOT_FIVE_REFERENCE_REVISION, STUDIO_SOURCE_SELECTION_REPAIR, STUDIO_EMPTY_VARIANT_REPAIR, STUDIO_ARCHIVED_WEBP_REPAIR } from './media-production-queue.ts';
 
 type Connection = { id: string; name: string };
-type PilotCheckpoint = { candidateId?: string; productId?: string; stage?: string; code?: string; failed?: boolean; editorial?: boolean; retryRevision?: string; sourceCount?: number; sourceRead?: number; sourceStep?: string; sourceAttemptUrls?: string[]; sourceDiagnostic?: ReturnType<typeof sourceDiagnostic>; sourceResponse?: { text: string; providerId: string; modelId: string }; sourceProbeCompleted?: boolean; sourceFailureHistory?: Record<string, unknown>[]; studio?: { results?: { code?: unknown }[] } };
+type PilotCheckpoint = { candidateId?: string; productId?: string; stage?: string; code?: string; failed?: boolean; editorial?: boolean; retryRevision?: string; sourceCount?: number; sourceRead?: number; sourceStep?: string; sourceAttemptUrls?: string[]; sourceDiagnostic?: ReturnType<typeof sourceDiagnostic>; sourceResponse?: { text: string; providerId: string; modelId: string }; sourceProbeCompleted?: boolean; sourceFailureHistory?: Record<string, unknown>[]; referenceSetRevision?: string; referenceSetStartedAt?: string; referenceUrls?: string[]; referenceSourceCompleted?: boolean; studio?: { results?: { code?: unknown }[] } };
 const SAFE_GAPS = new Set(['Título universal', 'Categoria', 'Descrição curta', 'Descrição longa', 'Material', 'Peso confirmado de cada item', 'Dimensões confirmadas de cada item']);
 export function technicalEvidenceCounts(supplier: CandidateSupplier) {
   const evidence = supplier.visualAttributes ?? [];
@@ -75,6 +75,20 @@ export function pilotStoredImportSummary(candidate?: Candidate) {
     return { storedRawAvailable: true, recoveredSourceCount: parsed.images?.length ?? 0, additionalAllowedSourceCount: new Set(additional).size,
       storedMobileDetailPresent: !!(base && typeof base === 'object' && (base as Record<string, unknown>).mobile_detail) };
   } catch { return { storedRawAvailable: true, storedRawParseFailed: true }; }
+}
+
+export function selectPilotReferenceUrls(media: MediaState, productId: string, supplier: CandidateSupplier, limit = 5) {
+  const request = media.productionRequests?.find(item => item.productId === productId);
+  const assetUrl = new Map(media.assets.filter(item => item.productId === productId && item.kind === 'ORIGINAL')
+    .map(item => [item.id, item.sourceUrl ?? item.url]));
+  const diagnostics = request?.sourceAssessment?.photoDiagnostics ?? [];
+  const rankedIds = [
+    ...(request?.sourceAssessment?.supportedSourceAssetIds ?? []),
+    ...diagnostics.filter(item => item.variantMatches === true).map(item => item.sourceAssetId),
+    ...(request?.sourceAssetIds ?? []),
+  ];
+  const rankedUrls = rankedIds.map(id => assetUrl.get(id)).filter((url): url is string => !!url);
+  return [...new Set([...rankedUrls, ...supplier.images])].filter(url => supplier.images.includes(url)).slice(0, limit);
 }
 
 export function selectPilotSupplier(connections: Connection[], preferred?: string) {
@@ -295,31 +309,55 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
     checkpoint.stage = 'SOURCE';
     const supplier = supplierForImageReading(candidate);
     if (!supplier?.images.length) return save('BLOCKED', 'SOURCE', { blocked: 1, code: 'source_images_missing', sourceCount: 0 });
-    checkpoint.sourceCount = supplier.images.length;
-    checkpoint.sourceRead = supplier.vision?.processedImages.length ?? 0;
+    const referenceRevision = process.env.DDF_PILOT_REFERENCE_SET_REVISION?.trim();
+    const boundedRestart = !!referenceRevision && referenceRevision === PILOT_FIVE_REFERENCE_REVISION;
+    if (boundedRestart && checkpoint.referenceSetRevision !== referenceRevision) {
+      const referenceUrls = selectPilotReferenceUrls(await loadMedia(), admitted.id, supplier, 5);
+      if (referenceUrls.length !== 5) return save('BLOCKED', 'SOURCE', { blocked: 1, code: 'source_images_missing', sourceCount: referenceUrls.length });
+      checkpoint.referenceSetRevision = referenceRevision;
+      checkpoint.referenceSetStartedAt = new Date().toISOString();
+      checkpoint.referenceUrls = referenceUrls;
+      checkpoint.referenceSourceCompleted = false;
+      checkpoint.sourceCount = 5;
+      checkpoint.sourceRead = 0;
+      checkpoint.failed = false;
+      delete checkpoint.code;
+      await save('PROCESSING', 'SOURCE', { sourceCount: 5, sourceRead: 0 });
+      console.info('DDF_PILOT_REFERENCE_RESTART', JSON.stringify({ revision: referenceRevision,
+        startedAt: checkpoint.referenceSetStartedAt, sourceCount: 5, batchSize: 5 }));
+    }
+    const activeUrls = boundedRestart ? checkpoint.referenceUrls ?? [] : supplier.images;
+    const activeVision = boundedRestart
+      ? checkpoint.referenceSourceCompleted ? { revision: SUPPLIER_VISION_REVISION, processedImages: activeUrls, completed: true } : undefined
+      : supplier.vision;
+    const activeSupplier = { ...supplier, images: activeUrls, vision: activeVision };
+    checkpoint.sourceCount = activeUrls.length;
+    checkpoint.sourceRead = activeVision?.processedImages?.length ?? 0;
     const singleProbe = retryRevision === 'source-diagnostic-single-1' && !checkpoint.sourceProbeCompleted;
-    const processedSources = supplier.vision && supplier.vision.revision === SUPPLIER_VISION_REVISION ? supplier.vision.processedImages : [];
-    checkpoint.sourceAttemptUrls = supplier.images.filter(url => !processedSources.includes(url)).slice(0, singleProbe ? 1 : 8);
+    const processedSources = activeVision && activeVision.revision === SUPPLIER_VISION_REVISION ? activeVision.processedImages : [];
+    checkpoint.sourceAttemptUrls = activeUrls.filter(url => !processedSources.includes(url)).slice(0, singleProbe ? 1 : boundedRestart ? 5 : 8);
     checkpoint.sourceStep = 'gateway_request';
     // Consume the attempt before paying. Persist the response before parsing so a parsing
     // failure can be investigated without paying again. No model text is emitted in logs.
     await save('PROCESSING', 'SOURCE', { failed: true, code: 'pilot_source_read_interrupted' });
-    const read = await readSupplierImages(supplier, `candidate:${candidate.id}:pilot`, async request => {
+    const read = await readSupplierImages(activeSupplier, `candidate:${candidate.id}:pilot`, async request => {
       const result = await generateGatewayText({ ...request, correlationId });
       checkpoint.sourceStep = 'response_validation';
       checkpoint.sourceResponse = { text: result.text.slice(0, 100_000), providerId: result.providerId, modelId: result.modelId };
       await save('PROCESSING', 'SOURCE', { failed: true, code: 'pilot_source_read_interrupted' });
       return result;
-    }, { batchSize: singleProbe ? 1 : 8 });
+    }, { batchSize: singleProbe ? 1 : boundedRestart ? 5 : 8 });
     checkpoint.sourceStep = 'supplier_state_write';
-    await command('intake.refreshSupplier', { candidateId: candidate.id, supplier: read }, true);
+    const storedRead = boundedRestart ? { ...read, images: supplier.images, vision: supplier.vision } : read;
+    await command('intake.refreshSupplier', { candidateId: candidate.id, supplier: storedRead }, true);
     checkpoint.failed = false;
     delete checkpoint.code;
     if (singleProbe) checkpoint.sourceProbeCompleted = true;
-    console.info('DDF_PILOT_SOURCE_READ', JSON.stringify({ sourceRead: read.vision?.processedImages.length ?? 0,
-      sourceCount: read.images.length, batchSize: checkpoint.sourceAttemptUrls.length,
+    if (boundedRestart && read.vision?.completed) checkpoint.referenceSourceCompleted = true;
+    console.info('DDF_PILOT_SOURCE_READ', JSON.stringify({ sourceRead: read.vision?.processedImages?.length ?? 0,
+      sourceCount: activeUrls.length, batchSize: checkpoint.sourceAttemptUrls.length,
       providerId: checkpoint.sourceResponse?.providerId, modelId: checkpoint.sourceResponse?.modelId }));
-    const counts = { sourceCount: read.images.length, sourceRead: read.vision?.processedImages.length ?? 0 };
+    const counts = { sourceCount: activeUrls.length, sourceRead: read.vision?.processedImages?.length ?? 0 };
     Object.assign(checkpoint, counts);
     if (!read.vision?.completed) return save('PROCESSING', 'SOURCE', { ...counts, continuing: 1 });
     candidate = (await loadIntake()).candidates.find(item => item.id === candidate!.id)!;
@@ -355,7 +393,15 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
       const archive = await persistSupplierOriginals(product.id, correlationId);
       if (archive.remaining) return save('BLOCKED', 'ARCHIVE', { ...counts, blocked: 1, code: 'source_archive_pending', remainingSources: archive.remaining });
       checkpoint.stage = 'STUDIO';
-      const queue = (await loadMedia()).productionRequests?.find(item => item.productId === product!.id);
+      let mediaForQueue = await loadMedia();
+      let queue = mediaForQueue.productionRequests?.find(item => item.productId === product!.id);
+      if (boundedRestart && queue && !queue.referenceSetHistory?.some(item => item.revision === referenceRevision)) {
+        const selectedIds = (checkpoint.referenceUrls ?? []).map(url => mediaForQueue.assets.find(asset => asset.productId === product!.id
+          && asset.kind === 'ORIGINAL' && (asset.sourceUrl === url || asset.url === url))?.id).filter((id): id is string => !!id);
+        await command('media.restartPilotReferenceSet', { requestId: queue.id, sourceAssetIds: selectedIds, revision: referenceRevision }, true);
+        mediaForQueue = await loadMedia();
+        queue = mediaForQueue.productionRequests?.find(item => item.productId === product!.id);
+      }
       if (queue && ['FALHOU', 'BLOQUEADO'].includes(queue.status)) {
         const currentGaps = productGaps(product).filter(gap => SAFE_GAPS.has(gap));
         return save('BLOCKED', 'STUDIO', { ...counts, blocked: 1, code: storedStudioFailureCode(queue.error) ?? 'pilot_studio_requires_review', gapCount: currentGaps.length, gaps: currentGaps });

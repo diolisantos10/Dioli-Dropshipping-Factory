@@ -28,6 +28,7 @@ export type MediaProductionRequest = {
   sourceAssessment?: { angle: string; variantIdentity: string; processedSourceAssetIds: string[]; supportedSourceAssetIds: string[]; evidence: string[];
     photoDiagnostics?: (Omit<import('./studio-gateway').StudioSourceDiagnostic, 'index'> & { sourceAssetId: string; sourceIndex: number; angle: string })[] };
   inspectionRetryHistory?: { revision: string; at: string; actor: string; assessment: NonNullable<MediaProductionRequest['sourceAssessment']>; error: string }[];
+  referenceSetHistory?: { revision: string; at: string; actor: string; sourceAssetIds: string[]; status: MediaProductionRequest['status']; error?: string; assessment?: NonNullable<MediaProductionRequest['sourceAssessment']> }[];
 };
 export type MediaState = { version: 1 | 2; assets: MediaAsset[]; jobs?: TransformationJob[]; productionRequests?: MediaProductionRequest[] };
 export const MEDIA_STORAGE_KEY = 'ddf.media.demo.v1';

@@ -5,6 +5,7 @@ import { addMedia, reviewMedia, ingestSupplierOriginals, studioReadiness, type M
 export const STUDIO_SOURCE_SELECTION_REPAIR = 'studio-source-selection-repair-1';
 export const STUDIO_EMPTY_VARIANT_REPAIR = 'studio-empty-variant-repair-1';
 export const STUDIO_ARCHIVED_WEBP_REPAIR = 'studio-archived-webp-transport-1';
+export const PILOT_FIVE_REFERENCE_REVISION = 'pilot-five-references-1';
 export function canRetryStudioInspection(state: MediaState, requestId: string, revision: string) {
   const request = state.productionRequests?.find(item => item.id === requestId);
   const history = request?.inspectionRetryHistory ?? [];
@@ -32,6 +33,22 @@ export function retryStudioInspection(state: MediaState, requestId: string, revi
   return { ...state, productionRequests: state.productionRequests?.map(request => request.id !== requestId ? request : {
     ...request, status: 'PENDENTE', updatedAt: at, error: undefined, sourceAssessment: undefined,
     inspectionRetryHistory: [...(request.inspectionRetryHistory ?? []), { revision, at, actor, assessment: structuredClone(request.sourceAssessment!), error: request.error! }],
+  }) };
+}
+
+/** Explicit pilot restart with a bounded reference set. The former request remains auditable. */
+export function restartPilotReferenceSet(state: MediaState, requestId: string, sourceAssetIds: string[], revision: string, at: string, actor: string): MediaState {
+  const request = state.productionRequests?.find(item => item.id === requestId);
+  const unique = [...new Set(sourceAssetIds)];
+  if (!request || revision !== PILOT_FIVE_REFERENCE_REVISION || !['BLOQUEADO', 'FALHOU'].includes(request.status)
+    || unique.length !== 5 || unique.some(id => !request.sourceAssetIds.includes(id)
+      || !state.assets.some(asset => asset.id === id && asset.productId === request.productId && asset.kind === 'ORIGINAL' && asset.status === 'APROVADA'))
+    || request.referenceSetHistory?.some(item => item.revision === revision)) throw new Error('A solicitação não aceita esta reinicialização limitada de referências.');
+  const history = { revision, at, actor, sourceAssetIds: [...request.sourceAssetIds], status: request.status,
+    ...(request.error ? { error: request.error } : {}), ...(request.sourceAssessment ? { assessment: structuredClone(request.sourceAssessment) } : {}) };
+  return { ...state, productionRequests: state.productionRequests?.map(item => item.id !== requestId ? item : {
+    ...item, status: 'PENDENTE', updatedAt: at, error: undefined, sourceAssetIds: unique, sourceAssessment: undefined,
+    referenceSetHistory: [...(item.referenceSetHistory ?? []), history],
   }) };
 }
 

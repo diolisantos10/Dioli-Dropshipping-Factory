@@ -32,6 +32,31 @@ test('audited per-photo diagnostics preserve unknown values, photo identity and 
   assert.equal(states.media.productionRequests[0].sourceAssessment.photoDiagnostics.length, 2);
   assert.throws(() => command(states, 'media.checkpointStudioAssessment', { ...base, photoDiagnostics: [{ ...row, sourceIndex: 2 }] }, 'SYSTEM'), /referências inválidas/);
 });
+test('pilot restart limits the active request to exactly five originals and preserves the former inspection', t => {
+  const oldPilot = process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID;
+  process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID = '1005013248254288';
+  t.after(() => { if (oldPilot === undefined) delete process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID; else process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID = oldPilot; });
+  const states = fixture();
+  states.intake.candidates[0].supplier.ref = '1005013248254288';
+  states.intake.candidates[0].supplier.images = Array.from({ length: 7 }, (_, index) => `https://img.test/${index}.jpg`);
+  states.media = command(states, 'media.bulkSendToMedia', { productIds: ['p1'] });
+  const request = states.media.productionRequests[0];
+  request.status = 'BLOQUEADO';
+  request.error = 'Revisão visual recusou a fidelidade; imagem preservada no histórico para conferência.';
+  request.sourceAssessment = { angle: 'frontal', variantIdentity: 'preto', processedSourceAssetIds: [...request.sourceAssetIds],
+    supportedSourceAssetIds: [request.sourceAssetIds[2]], evidence: ['Inspeção anterior'] };
+  const former = structuredClone(request);
+  states.media = command(states, 'media.restartPilotReferenceSet', { requestId: request.id,
+    sourceAssetIds: request.sourceAssetIds.slice(1, 6), revision: 'pilot-five-references-1' }, 'SYSTEM');
+  const restarted = states.media.productionRequests[0];
+  assert.equal(restarted.status, 'PENDENTE');
+  assert.equal(restarted.sourceAssetIds.length, 5);
+  assert.equal(restarted.sourceAssessment, undefined);
+  assert.deepEqual(restarted.referenceSetHistory[0].sourceAssetIds, former.sourceAssetIds);
+  assert.deepEqual(restarted.referenceSetHistory[0].assessment, former.sourceAssessment);
+  assert.throws(() => command(states, 'media.restartPilotReferenceSet', { requestId: request.id,
+    sourceAssetIds: restarted.sourceAssetIds, revision: 'pilot-five-references-1' }, 'SYSTEM'), /não aceita/);
+});
 test('reviewed source-selection repair is SYSTEM-only, once, before generation, and preserves full old inspection history', t => {
   const oldPilot = process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID;
   process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID = '1005013226256365';

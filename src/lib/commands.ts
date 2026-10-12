@@ -6,7 +6,7 @@ import { addCandidate, bulkTransitionCandidates, refreshCandidateSupplier, empty
 import { archiveProducts, emptyProductFactory, markProductReady, refreshProductSupplier, restoreProductVersion, setProductAvailability, startProduct, updateProduct, updateProductFiscal, type ProductFactoryState, type UniversalProductSpec } from './product-factory.ts';
 import type { Availability, ProductFiscal, VariantLogistics } from './product-fiscal.ts';
 import { addMedia, completeTransformation, emptyMedia, enqueueTransformation, ingestSupplierOriginals, studioReadiness, reviewMedia, updateTransformationJob, type MediaAsset, type MediaState, type TransformationJob } from './media-factory.ts';
-import { bulkSendToMedia, checkpointStudioAssessment, recordMediaProductionResult, retryStudioInspection, updateMediaProductionRequest } from './media-production-queue.ts';
+import { bulkSendToMedia, checkpointStudioAssessment, PILOT_FIVE_REFERENCE_REVISION, recordMediaProductionResult, restartPilotReferenceSet, retryStudioInspection, updateMediaProductionRequest } from './media-production-queue.ts';
 import { requestProductCompletion, updateCompletionRequest } from './product-completion-queue.ts';
 import { approvePrice, calculatePrice, emptyPricing, recalculateSupplierCost, releaseQuarantine, type PricingInput, type PricingState } from './pricing.ts';
 import { advanceOrder, emptyOrders, flagOrderException, purgeExpiredOrderData, receiveOrder, resolveOrderException, type ExceptionCategory, type ExceptionResolution, type OrderState, type OrderStatus } from './orders.ts';
@@ -271,6 +271,17 @@ export const COMMANDS: Record<string, Handler> = {
     const candidate = s.intake.candidates.find(item => item.id === product.candidateId);
     if (!pilotItemId || !/^\d{5,30}$/.test(pilotItemId) || candidate?.supplier?.ref !== pilotItemId) throw new CommandError('Revisão de inspeção permitida somente ao produto do piloto configurado.', 403);
     return retryStudioInspection(s.media, requestId, str(i, 'revision', 80), c.at, c.actor);
+  } },
+  'media.restartPilotReferenceSet': { writes: 'media', reads: ['products', 'intake'], roles: always(['SYSTEM']), run: (s, i, c) => {
+    const requestId = str(i, 'requestId', 80);
+    const request = s.media.productionRequests?.find(item => item.id === requestId);
+    if (!request) throw new CommandError('Solicitação de mídia não encontrada.', 404);
+    const product = productInProduction(s, request.productId);
+    const candidate = s.intake.candidates.find(item => item.id === product.candidateId);
+    if (process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID !== candidate?.supplier?.ref) throw new CommandError('Reinicialização permitida somente ao piloto configurado.', 403);
+    const revision = str(i, 'revision', 80);
+    if (revision !== PILOT_FIVE_REFERENCE_REVISION) throw new CommandError('Revisão de referências não autorizada.', 403);
+    return restartPilotReferenceSet(s.media, requestId, ids(i, 'sourceAssetIds'), revision, c.at, c.actor);
   } },
   'media.recordStudioResult': { writes: 'media', reads: ['products'], roles: always(['SYSTEM']), run: (s, i, c) => {
     if (typeof i.approved !== 'boolean') throw new CommandError('Informe o resultado da revisão visual.');
