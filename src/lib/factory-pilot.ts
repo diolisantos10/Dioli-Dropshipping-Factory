@@ -14,6 +14,7 @@ import { enrichSupplierPage, SUPPLIER_PAGE_REVISION } from './providers/supplier
 import { repairStoredVariantSchemas } from './stored-variant-repair.ts';
 import { sameStoredValue } from './same-value.ts';
 import { sourceDiagnostic } from './pilot-source-diagnostic.ts';
+import { storedStudioOutcome } from './studio-outcome-diagnostic.ts';
 import { generateGatewayText, GatewayError } from './ai-gateway';
 import { parseCommercialCopy } from './factory-production-rules';
 import { archiveSourceAllowed, persistSupplierOriginals } from './supplier-media-archive';
@@ -266,6 +267,10 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
   const command = (name: string, input: Record<string, unknown>, trusted = false) => runServerCommand(name, input, trusted ? system : identity);
   const save = async (status: string, stage: string, extra: Record<string, unknown> = {}) => {
     checkpoint.stage = stage;
+    if (stage === 'STUDIO' && checkpoint.productId) {
+      const storedMedia = ((await readState('media'))?.payload ?? emptyMedia) as MediaState;
+      console.info('DDF_STUDIO_OUTCOME_DIAGNOSTIC', JSON.stringify(storedStudioOutcome(storedMedia, checkpoint.productId)));
+    }
     await db.query(`INSERT INTO factory_production_runs(candidate_id,product_id,status,stage,detail,attempts)
       VALUES($1,$2,$3,$4,$5,1) ON CONFLICT(candidate_id) DO UPDATE SET product_id=$2,status=$3,stage=$4,detail=$5,updated_at=now()`,
     [key, checkpoint.productId ?? null, status, stage, JSON.stringify({ ...checkpoint, ...extra })]);
