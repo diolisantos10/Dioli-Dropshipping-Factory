@@ -14,7 +14,7 @@ import { enrichSupplierPage, SUPPLIER_PAGE_REVISION } from './providers/supplier
 import { repairStoredVariantSchemas } from './stored-variant-repair.ts';
 import { sameStoredValue } from './same-value.ts';
 import { sourceDiagnostic } from './pilot-source-diagnostic.ts';
-import { SINGLE_PHOTO_TRIAL_REVISION } from './studio-one-photo-trial.ts';
+import { SINGLE_PHOTO_TRIAL_REVISION, singlePhotoTrialPreflight } from './studio-one-photo-trial.ts';
 import { storedStudioOutcome } from './studio-outcome-diagnostic.ts';
 import { generateGatewayText, GatewayError } from './ai-gateway';
 import { parseCommercialCopy } from './factory-production-rules';
@@ -233,6 +233,12 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
       referenceSummary = { ...pilotStudioReferenceSummary(media, prior.productId), ...pilotStoredImportSummary(recordedCandidate) };
       gaps = product ? productGaps(product).filter(gap => SAFE_GAPS.has(gap)) : [];
       const request = media.productionRequests?.find(item => item.productId === prior.productId);
+      if (request && process.env.DDF_PILOT_SINGLE_PHOTO_TRIAL === SINGLE_PHOTO_TRIAL_REVISION) {
+        console.info('DDF_STUDIO_SINGLE_PHOTO_PREFLIGHT', JSON.stringify({
+          ...singlePhotoTrialPreflight(media, request.id), candidateApproved: recordedCandidate?.status === 'APROVADO',
+          configuredOnePhotoLimit: process.env.DDF_PILOT_MAX_APPROVED_PHOTOS === '1',
+          configuredPilotMatches: process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID === recordedCandidate?.supplier?.ref }));
+      }
       const references = pilotStudioReferenceSummary(media, prior.productId);
       if ((retryRevision === STUDIO_SOURCE_SELECTION_REPAIR && code === 'studio_missing_references'
         || [STUDIO_EMPTY_VARIANT_REPAIR, STUDIO_ARCHIVED_WEBP_REPAIR].includes(retryRevision ?? '') && code === 'studio_unsupported_view') && request

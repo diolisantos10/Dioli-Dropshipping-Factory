@@ -17,3 +17,14 @@ export function authorizeSinglePhotoTrial(state: MediaState, requestId: string, 
       previousAssessment: structuredClone(item.sourceAssessment!), previousDerivedAssetIds: existing.map(asset => asset.id) }],
   } : item) };
 }
+export function singlePhotoTrialPreflight(state: MediaState, requestId: string) {
+  const request = state.productionRequests?.find(item => item.id === requestId);
+  const derived = state.assets.filter(item => item.productId === request?.productId && item.studio === true && item.kind === 'DERIVADA');
+  return { requestPresent: !!request, blocked: request?.status === 'BLOQUEADO',
+    expectedFidelityError: request?.error === 'Revisão visual recusou a fidelidade; imagem preservada no histórico para conferência.',
+    referenceCount: request?.sourceAssetIds.length ?? 0, processedCount: request?.sourceAssessment?.processedSourceAssetIds.length ?? 0,
+    supportedCount: request?.sourceAssessment?.supportedSourceAssetIds.length ?? 0, hasVariant: !!request?.sourceAssessment?.variantIdentity?.trim(),
+    allSourcesProcessed: !!request && request.sourceAssetIds.every(id => request.sourceAssessment?.processedSourceAssetIds.includes(id)),
+    priorDerivedCount: derived.length, allDerivedRejected: derived.length > 0 && derived.every(item => item.status === 'REJEITADA'),
+    trialConsumed: !!request?.singlePhotoTrialHistory?.some(item => item.revision === SINGLE_PHOTO_TRIAL_REVISION) };
+}
