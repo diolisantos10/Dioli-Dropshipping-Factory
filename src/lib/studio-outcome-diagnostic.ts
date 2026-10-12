@@ -3,7 +3,7 @@ import type { MediaState } from './media-factory';
 /** Read-only, bounded telemetry from an already saved studio result. Never calls a model or retries production. */
 export function storedStudioOutcome(media: MediaState, productId: string) {
   const request = media.productionRequests?.find(item => item.productId === productId);
-  const derived = media.assets.filter(item => item.productId === productId && item.kind === 'DERIVADA' && item.studio === true);
+  const derived = (media.assets ?? []).filter(item => item.productId === productId && item.kind === 'DERIVADA' && item.studio === true);
   const latest = [...derived].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
   const evidence = (latest?.fidelityEvidence ?? '').slice(0, 10_000);
   return {
