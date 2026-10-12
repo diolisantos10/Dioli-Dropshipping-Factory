@@ -236,20 +236,20 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
       if (request && process.env.DDF_PILOT_SINGLE_PHOTO_TRIAL === SINGLE_PHOTO_TRIAL_REVISION) {
         console.info('DDF_STUDIO_SINGLE_PHOTO_PREFLIGHT', JSON.stringify({
           ...singlePhotoTrialPreflight(media, request.id), candidateApproved: recordedCandidate?.status === 'APROVADO',
-          configuredRequestedPilot: process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID === '1005013226256365',
-          candidateRequestedPilot: recordedCandidate?.supplier?.ref === '1005013226256365',
+          configuredRequestedPilot: process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID === '1005013248254288',
+          candidateRequestedPilot: recordedCandidate?.supplier?.ref === '1005013248254288',
           productInProduction: product?.status === 'EM_PRODUCAO', productArchived: !!product?.archivedAt,
           configuredOnePhotoLimit: process.env.DDF_PILOT_MAX_APPROVED_PHOTOS === '1',
           configuredPilotMatches: process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID === recordedCandidate?.supplier?.ref }));
       }
 
       if (request && prior.code === 'pilot_step_failed' && process.env.DDF_PILOT_SINGLE_PHOTO_TRIAL === SINGLE_PHOTO_TRIAL_REVISION
-        && prior.singlePhotoPreflightRepair !== 'one-photo-preflight-technical-1'
+        && prior.singlePhotoPreflightRepair !== 'one-photo-pilot-identity-fix-1'
         && !request.singlePhotoTrialHistory?.length) {
         // A local setup exception occurred BEFORE any new paid image or consumed authorization.
         // Retain it, permit exactly one technical replay, and log any repeated setup exception safely.
         prior.singlePhotoPreflightFailure = { stage: prior.stage, code: prior.code, at: new Date().toISOString() };
-        prior.singlePhotoPreflightRepair = 'one-photo-preflight-technical-1';
+        prior.singlePhotoPreflightRepair = 'one-photo-pilot-identity-fix-1';
         prior.failed = false;
         delete prior.code;
         await db.query('UPDATE factory_production_runs SET detail=$2,status=\'PROCESSING\',updated_at=now() WHERE candidate_id=$1',

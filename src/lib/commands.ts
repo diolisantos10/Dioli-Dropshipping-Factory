@@ -291,7 +291,7 @@ export const COMMANDS: Record<string, Handler> = {
     const product = productInProduction(s, request.productId);
     const candidate = s.intake.candidates.find(item => item.id === product.candidateId);
     const revision = str(i, 'revision', 80);
-    if (candidate?.status !== 'APROVADO' || candidate?.supplier?.ref !== '1005013226256365' || process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID !== candidate.supplier.ref
+    if (candidate?.status !== 'APROVADO' || candidate?.supplier?.ref !== '1005013248254288' || process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID !== candidate.supplier.ref
       || process.env.DDF_PILOT_SINGLE_PHOTO_TRIAL !== SINGLE_PHOTO_TRIAL_REVISION || revision !== SINGLE_PHOTO_TRIAL_REVISION
       || process.env.DDF_PILOT_MAX_APPROVED_PHOTOS !== '1') throw new CommandError('Teste único não autorizado para este piloto.', 403);
     return authorizeSinglePhotoTrial(s.media, requestId, revision, c.at, c.actor);

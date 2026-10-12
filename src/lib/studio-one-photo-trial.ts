@@ -1,6 +1,6 @@
 import type { MediaState } from './media-factory.ts';
 export const SINGLE_PHOTO_TRIAL_REVISION = 'pilot-one-photo-trial-20261012-011020';
-/** The CEO explicitly authorized ONE new image on 12 Oct. Preserve every rejected asset and prior review. */
+/** The CEO explicitly authorized ONE new image on 12 Oct for supplier item 1005013248254288. Preserve every rejected asset and prior review. */
 export function authorizeSinglePhotoTrial(state: MediaState, requestId: string, revision: string, at: string, actor: string): MediaState {
   const request = state.productionRequests?.find(item => item.id === requestId);
   if (!request || revision !== SINGLE_PHOTO_TRIAL_REVISION || request.status !== 'BLOQUEADO'
