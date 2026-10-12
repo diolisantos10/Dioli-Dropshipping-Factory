@@ -236,6 +236,8 @@ export async function runFactoryPilot(_actor: string, correlationId: string) {
       if (request && process.env.DDF_PILOT_SINGLE_PHOTO_TRIAL === SINGLE_PHOTO_TRIAL_REVISION) {
         console.info('DDF_STUDIO_SINGLE_PHOTO_PREFLIGHT', JSON.stringify({
           ...singlePhotoTrialPreflight(media, request.id), candidateApproved: recordedCandidate?.status === 'APROVADO',
+          configuredRequestedPilot: process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID === '1005013226256365',
+          candidateRequestedPilot: recordedCandidate?.supplier?.ref === '1005013226256365',
           productInProduction: product?.status === 'EM_PRODUCAO', productArchived: !!product?.archivedAt,
           configuredOnePhotoLimit: process.env.DDF_PILOT_MAX_APPROVED_PHOTOS === '1',
           configuredPilotMatches: process.env.DDF_PILOT_ALIEXPRESS_ITEM_ID === recordedCandidate?.supplier?.ref }));
